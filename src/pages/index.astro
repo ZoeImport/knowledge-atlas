@@ -4,7 +4,7 @@ import notes from '../content/notes.json'
 import '../styles/global.css'
 
 const categories = [...new Set(keywords.map((k) => k.category))]
-const noteCount = (id) => notes.filter((n) => n.keywordId === id).length
+const noteFor = (id) => notes.find((n) => n.keywordId === id)
 const base = import.meta.env.BASE_URL
 ---
 <!doctype html>
@@ -20,25 +20,46 @@ const base = import.meta.env.BASE_URL
       <header class="atlas-hero">
         <span class="eyebrow">Knowledge Atlas</span>
         <h1>知识图谱<em>.</em></h1>
-        <p>关键词与 note 的独立知识站。每个词都有判断、机制、边界与坑——点进去读完整讲解。</p>
+        <p>关键词与 note 的独立知识站。每个词都有一条完整的学习路径：从它从哪来，到原理的原理，再到下一步。</p>
       </header>
       <main>
         {categories.map((cat) => (
-          <section class="category">
-            <h2>{cat}</h2>
+          <section class="category reveal">
+            <h2>{cat} <span class="count">{keywords.filter((k) => k.category === cat).length} 词</span></h2>
             <div class="card-grid">
-              {keywords.filter((k) => k.category === cat).map((k) => (
-                <a class="card" href={`${base}keywords/${k.id}/`}>
-                  <h3>{k.title}</h3>
-                  <p>{k.summary}</p>
-                  <span class="meta">{noteCount(k.id)} note · {k.tags.slice(0, 3).join(' / ')}</span>
-                </a>
-              ))}
+              {keywords.filter((k) => k.category === cat).map((k) => {
+                const note = noteFor(k.id)
+                return (
+                  <a class="card" href={`${base}keywords/${k.id}/`}>
+                    <span class="card-cat">{k.category}</span>
+                    <h3>{k.title}</h3>
+                    <p>{k.summary}</p>
+                    <div class="card-meta">
+                      <span>{note ? note.angles.length : 0} 角度 · {note ? note.subTopics.length : 0} 子词</span>
+                      {k.tags.slice(0, 2).map((t) => <span class="tag">{t}</span>)}
+                    </div>
+                  </a>
+                )
+              })}
             </div>
           </section>
         ))}
       </main>
       <footer class="site-footer">Knowledge Atlas · 关键词与笔记</footer>
     </div>
+    <script is:inline>
+      (() => {
+        const els = document.querySelectorAll('.reveal')
+        if (!els.length) return
+        els.forEach((el) => el.classList.add('js-pending'))
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          els.forEach((el) => el.classList.add('is-in')); return
+        }
+        const io = new IntersectionObserver((es) => es.forEach((e) => {
+          if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target) }
+        }), { threshold: 0.1 })
+        els.forEach((el) => io.observe(el))
+      })()
+    </script>
   </body>
 </html>
