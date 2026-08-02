@@ -1,0 +1,11 @@
+[
+  { "id": "ebpf", "title": "eBPF", "category": "Linux 内核", "summary": "在内核虚拟机上安全跑字节码，用来观测、追踪和改网络数据面。", "tags": ["内核", "追踪", "XDP", "kprobe"], "related": ["linux-netstack"], "books": ["csapp"] },
+  { "id": "iptables", "title": "iptables", "category": "网络", "summary": "netfilter 的用户态规则表，链与表的匹配流转，NAT 与防火墙。", "tags": ["防火墙", "netfilter", "NAT"], "related": ["linux-netstack"], "books": ["csapp"] },
+  { "id": "linux-netstack", "title": "Linux 内核网络栈", "category": "Linux 内核", "summary": "数据包从网卡到 socket 的路径：NAPI、协议层、netfilter、路由。", "tags": ["内核", "协议栈"], "related": ["ebpf", "iptables"], "books": ["csapp"] },
+  { "id": "clash-schedule", "title": "Clash / mihomo 调度原理", "category": "代理", "summary": "规则 → 策略组 → 出站节点的调度链：DNS、FakeIP、分流决策。", "tags": ["clash", "mihomo", "代理"], "related": ["clash-rule", "fakeip"], "books": [] },
+  { "id": "clash-rule", "title": "Clash Rule 规则体系", "category": "代理", "summary": "DOMAIN / IP-CIDR / GEOIP / MATCH 的匹配优先级与写法。", "tags": ["clash", "规则"], "related": ["clash-schedule"], "books": [] },
+  { "id": "fakeip", "title": "FakeIP 与 DNS 泄露", "category": "代理", "summary": "用虚拟地址接管域名解析，避免真实 IP 泄露；配置不当反而泄露。", "tags": ["dns", "fake-ip", "隐私"], "related": ["clash-schedule"], "books": [] },
+  { "id": "proxy-deploy", "title": "服务器代理部署", "category": "代理", "summary": "把节点部署到远程服务器当出口：选点、fallback、systemd、校验。", "tags": ["服务器", "代理"], "related": ["clash-schedule"], "books": [] },
+  { "id": "k8s-crd", "title": "Kubernetes CRD", "category": "Kubernetes", "summary": "教 Kubernetes 认识新名词的方式；契约是 CRD，履约的是 controller。", "tags": ["k8s", "CRD", "operator"], "related": [], "books": [] },
+  { "id": "cpp-move-rust-ownership", "title": "C++ 移动语义 vs Rust 所有权", "category": "语言", "summary": "C++ 的 std::move 是显式允许转移，Rust 的 move 是默认且强制的语言规则。", "tags": ["C++", "Rust", "所有权"], "related": [], "books": ["csapp"] }
+]

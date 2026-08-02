@@ -1,0 +1,44 @@
+---
+import keywords from '../content/keywords.json'
+import notes from '../content/notes.json'
+import '../styles/global.css'
+
+const categories = [...new Set(keywords.map((k) => k.category))]
+const noteCount = (id) => notes.filter((n) => n.keywordId === id).length
+const base = import.meta.env.BASE_URL
+---
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f3eee4" />
+    <title>Knowledge Atlas — 关键词与笔记</title>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="atlas-hero">
+        <span class="eyebrow">Knowledge Atlas</span>
+        <h1>知识图谱<em>.</em></h1>
+        <p>关键词与 note 的独立知识站。每个词都有判断、机制、边界与坑——点进去读完整讲解。</p>
+      </header>
+      <main>
+        {categories.map((cat) => (
+          <section class="category">
+            <h2>{cat}</h2>
+            <div class="card-grid">
+              {keywords.filter((k) => k.category === cat).map((k) => (
+                <a class="card" href={`${base}keywords/${k.id}/`}>
+                  <h3>{k.title}</h3>
+                  <p>{k.summary}</p>
+                  <span class="meta">{noteCount(k.id)} note · {k.tags.slice(0, 3).join(' / ')}</span>
+                </a>
+              ))}
+            </div>
+          </section>
+        ))}
+      </main>
+      <footer class="site-footer">Knowledge Atlas · 关键词与笔记</footer>
+    </div>
+  </body>
+</html>

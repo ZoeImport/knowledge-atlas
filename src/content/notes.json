@@ -1,0 +1,189 @@
+[
+  {
+    "id": "k8s-crd",
+    "keywordId": "k8s-crd",
+    "judgment": "Kubernetes 是一个「一切皆 API 对象」的系统，而 CRD 是你教它认识新名词的方式——但记住：光有名词没有动词，系统依然一动不动。",
+    "why": "你迟早会撞上一个官方资源表达不了的东西：想声明「我要一个 PostgreSQL 实例」「我要一张证书」。Pod、Deployment 的词表里没有这些词。两条路：塞进 ConfigMap 靠脚本自己盯，或者教 Kubernetes 认识新名词。前者省事，但你会亲手丢掉 Kubernetes 最值钱的东西——声明式期望状态、校验、RBAC、事件、状态回写。CRD 就是注册「新名词」的标准通道；整个云原生生态里所有 Custom 开头的东西都建在这上面。",
+    "mechanism": "CRD 本身只是一张「词表条目」——一份描述新资源长什么样的 OpenAPI schema。apply 之后，API server 才认识 `kubectl get websites` 这种语法。一个普遍误解要当场拆掉：CRD 不干活。它只负责接受、校验、存储；真正干活的是 controller——watch 到自定义资源被创建，读期望状态（spec），把现实拨到那个状态，把观察结果写回 status。心智模型：CRD 是契约，controller 是履约的人。",
+    "boundaries": [
+      "vs ConfigMap：ConfigMap 是不挑食的钥匙串；CRD 是带类型、带校验、带版本、可 watch 的正式公民。区别不在能不能存，而在 API server 对它有承诺。",
+      "vs 准入 Webhook：CRD 自带基础校验（schema + CEL）；复杂规则在 Validating/Mutating webhook 里做。别指望 schema 扛下所有规则。",
+      "vs Aggregated API（APIService）：CRD 只有 schema 没有逻辑；aggregated API 是你自己写的完整 API server 挂进集群。CRD 便宜，聚合 API 强大但贵。",
+      "vs Operator：Operator 是「CRD + controller + 常配 webhook 与打包」的统称，你早就认识它的一半——controller。"
+    ],
+    "practices": [
+      "版本演进最痛：schema 一旦成为 storage 版本就是持久承诺，改结构要准备多版本共存和 conversion；v1alpha1 不是随便起的名字。",
+      "spec 和 status 必须分开：spec 是你想要的世界，status 是现实世界，controller 负责两者间的差额。把只读状态写进 spec 是新手签名。",
+      "finalizer 会让删除卡死：对象一直停在 Terminating，八成是有 finalizer 在等一个永远不来的回调。",
+      "校验只是入口安检：schema 只在你读写 API 的那一刻生效；没声明的字段默认会被 prune 掉——多传一个字段没报错，不代表它被存下来了。",
+      "CRD 是集群级对象：放开 apply 权限 = 放开「给集群新增 API」的入口；使用者要单独授予该 group 的 RBAC。"
+    ],
+    "example": "让集群认识「网站」这个词：一个 `kind: CustomResourceDefinition`，group 为 example.com，names 定义 plural/singular/kind/shortNames，schema 声明 spec.image 是 string。apply 之后 `kubectl get web` 就有了这个名词。然后呢？没有任何 Pod 会因此跑起来——除非有个 controller 蹲在旁边 watch Website，把 image 变成一份 Deployment。这个例子的另一半，才是整个故事。",
+    "subTopics": ["Operator 模式", "Controller / Reconcile 循环", "Finalizer", "OwnerReference", "结构 Schema 与 CEL 校验", "Validating / Mutating Webhook", "Status 子资源", "Informer / Watch 机制", "多版本与 Conversion"]
+  },
+  {
+    "id": "ebpf",
+    "keywordId": "ebpf",
+    "judgment": "eBPF 是「在内核里安全跑你写的字节码」——它让你不用改内核、不用加载内核模块，就能观测和干预内核在做什么。",
+    "why": "想追踪内核函数、统计网络包、做高性能负载均衡，传统两条路都难走：改内核源码要编译整个内核，加载内核模块要面对崩溃的风险。eBPF 在 2014 年（Linux 3.18）由 Alexei Starovoitov 引入，把经典 BPF（1992 年给 tcpdump 用的包过滤器）升级成内核内通用、安全、可编程的执行环境——你想看的任何内核行为，几乎都能用一段字节码观察。",
+    "mechanism": "eBPF 程序通过 bpf() 系统调用加载，经过 verifier 静态验证（内存安全、有界循环、指针检查），通过后 JIT 编译成原生指令，挂在事件点上运行：tracepoint/kprobe（内核函数）、uprobe（用户态）、XDP（网卡驱动入口）。它不通过改内核源码，而是把程序「放进」内核的指定位置。心智模型：eBPF 是内核里的可插拔探针，verifier 是安检，JIT 是把它编译成原生性能。",
+    "boundaries": [
+      "vs 内核模块：模块是「能跑任何代码」的信任票，崩了连累整个内核；eBPF 被 verifier 约束住，崩溃最多让探针失效。",
+      "vs bpftrace：bpftrace 是 eBPF 的脚本语言，一行写出追踪逻辑；libbpf 是写正经工具的正经方式。",
+      "vs 传统包过滤：经典 BPF 只过滤包；eBPF 能在 XDP 处丢包、转发、做负载均衡，进了数据面。",
+      "vs seccomp：seccomp 用 BPF 限制系统调用（安全）；eBPF 更多用于观测与网络，安全只是用途之一。"
+    ],
+    "practices": [
+      "verifier 不认复杂循环：有界循环可以，动态下标、越界访问会被拒——别跟 verifier 较劲，改数据结构。",
+      "bpf_map 是共享通道：内核程序与用户态靠 map 交换数据，设计 map 结构往往比写程序本身更难。",
+      "XDP 转发要自己处理回程：XDP 在协议栈之前，丢包容易，转发要小心（很多场景靠 TC 钩子补）。",
+      "不同内核版本行为差异大：kprobe 事件名、helper 函数随内核变，写可移植程序要处理版本差异。"
+    ],
+    "example": "bpftrace 一行：`bpftrace -e 'kprobe:do_sys_openat2 { printf(\"%s %s\\n\", comm, str(args->filename)); }'`——每次打开文件都打印进程名和路径。它展示了 eBPF 的哲学：不改内核、不加日志代码，就能看到内核在做什么。而这个例子的另一半是 XDP：在网卡入口处直接丢包/转发，性能达到内核数据面的极致。",
+    "subTopics": ["BPF verifier", "JIT 编译", "XDP", "kprobe / tracepoint", "libbpf / bpftrace", "bpf_map", "TC 钩子"]
+  },
+  {
+    "id": "iptables",
+    "keywordId": "iptables",
+    "judgment": "iptables 是给内核 netfilter 写规则的用户态界面——它不自己过滤包，它只是把「哪些包怎么处理」翻译成内核钩子上的规则表。",
+    "why": "你要开端口、做端口转发、做 NAT，绕不开它。Linux 2.4（2001）起 iptables 取代 ipchains，成为 netfilter 的标准配置界面。虽然 nftables 是它的后继者，但绝大多数系统、K8s 的 kube-proxy（iptables 模式）、Docker 的端口映射，都还在 iptables 上跑——不读它，你连「为什么我的容器端口不通」都排查不了。",
+    "mechanism": "netfilter 在内核协议栈埋了钩子，iptables 把规则写进规则表。五张表（filter/nat/mangle/raw/security）挂在不同阶段，四条内置链对应包路径：PREROUTING（入站路由前）、INPUT（本机入站）、FORWARD（转发）、OUTPUT（本机出站）、POSTROUTING（出站路由后）。规则按顺序匹配，命中执行 target（ACCEPT/DROP/SNAT/DNAT/MASQUERADE/LOG）。conntrack 连接跟踪支撑状态化过滤与 NAT 回程。心智模型：表是「做什么」，链是「在包路径的哪个位置做」。",
+    "boundaries": [
+      "vs nftables：nftables 是后继者，统一框架、语法更清晰；iptables 是兼容层，新部署值得考虑 nftables。",
+      "vs 应用层防火墙：iptables 工作在 L3/L4（IP/端口），不懂 HTTP 路径；应用层防护交给 WAF。",
+      "vs Firewalld/ufw：firewalld 是 iptables/nftables 的 zone 化封装，ufw 是简化前端，底层都是同一套。",
+      "vs conntrack：conntrack 不是 iptables 的命令，是内核的连接跟踪表，iptables 的状态化规则依赖它。"
+    ],
+    "practices": [
+      "规则顺序是命门：iptables 按顺序匹配，先命中先生效——把宽泛规则放前面会吞掉后面的精确规则。",
+      "NAT 只对首包生效：nat 表只在连接首个包时处理，回程靠 conntrack 自动还原，别想在 NAT 里逐包做手脚。",
+      "FORWARD 默认可能是 DROP：很多系统 FORWARD 链默认拒绝，容器网络不通先查它，不是 INPUT。",
+      "DELETE 与新增规则容易漏：改规则前先 `iptables -L -n --line-numbers` 看现有规则，避免重复或顺序错乱。"
+    ],
+    "example": "`iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080`——把入站 80 端口重定向到 8080。这句里：-t nat 选表、PREROUTING 选链（入站路由前）、-j REDIRECT 是 target。它的另一半是 MASQUERADE：`iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE`，让内网设备共享出口 IP——一个在入口改目标，一个在出口改源。",
+    "subTopics": ["netfilter 钩子", "表与链", "NAT（SNAT/DNAT/MASQUERADE）", "conntrack", "nftables", "kube-proxy iptables 模式"]
+  },
+  {
+    "id": "clash-schedule",
+    "keywordId": "clash-schedule",
+    "judgment": "Clash/mihomo 的本质是一个「分流调度器」：每一个连接问一次规则引擎，规则引擎把它交给某个策略组，策略组再挑一个节点——三步，决定了你的流量走哪。",
+    "why": "你配好代理节点后，最关心的就是「哪些走代理、哪些直连、断了一个节点会不会自动换」。这些都由调度链决定。mihomo（原 Clash.Meta）是当前主流内核；不读它的调度原理，你就只会填配置、不懂为什么某个网站走了错误的节点。",
+    "mechanism": "请求路径：① 连接发起，先查 DNS（经 DNS 过滤链）；② 命中 fake-ip-range 的返回虚拟 IP，同时保留域名供规则匹配；③ 规则引擎按 rules 顺序逐条匹配（域名/IP/GEOIP），命中某策略组或 DIRECT/REJECT；④ 策略组按策略选节点：url-test（定期测延迟选最快）、fallback（主备切换）、load-balance（负载均衡）；⑤ 出站经选定节点建立连接。配置四要素：proxies（节点）、proxy-groups（策略组）、rules（规则）、dns（解析策略）。心智模型：rules 是分类器，proxy-groups 是选择器，proxies 是执行者。",
+    "boundaries": [
+      "vs 简单系统代理：系统代理只把流量交给一个固定代理；clash 能按规则分流、自动切换节点。",
+      "vs VPN：VPN 是三层/二层的全局接管；clash 是七层应用代理，只处理能识别的协议。",
+      "vs ss/ssr 单体：单独一个 shadowsocks 客户端没有规则引擎；clash 是「规则 + 多节点 + 策略组」的调度器。",
+      "vs 透明代理：clash 可配 TUN 模式做透明接管，但默认是系统代理模式。"
+    ],
+    "practices": [
+      "FakeIP 与规则匹配强相关：开 fake-ip 后规则按域名匹配；如果 DNS 走了绕过 fake-ip 的路径，规则会退化成按 IP 匹配，分流立刻乱。",
+      "url-test 组别配太多节点：每次测延迟都发探测请求，组里塞几十个节点会拖慢切换。",
+      "fallback 的 healthcheck 间隔别太短：太频繁探测浪费流量，太长故障切换迟钝。",
+      "规则顺序决定一切：一条宽泛的 DOMAIN-SUFFIX 放前面，后面的精确规则全失效。"
+    ],
+    "example": "一个请求走 `google.com`：规则引擎先看 DOMAIN-SUFFIX,google.com 是否命中 → 命中 `PROXY` 策略组 → 策略组是 url-test，选延迟最低的日本节点 → 出站。它的另一半：`MATCH,DIRECT` 兜底让没命中的流量直连——一个走代理、一个直连，靠的就是规则顺序和兜底。",
+    "subTopics": ["FakeIP", "策略组（url-test / fallback）", "规则匹配链", "出站节点", "DNS 解析链", "TUN 模式"]
+  },
+  {
+    "id": "clash-rule",
+    "keywordId": "clash-rule",
+    "judgment": "Clash 规则不是「配置项」，是一段自上而下、先命中先生效的决策程序——规则的顺序本身就是逻辑。",
+    "why": "你写的每一行规则都在决定流量去向，而最常见的错误就是把规则顺序写反。理解规则类型和匹配优先级，是配置代理从「能跑」到「不出错」的分水岭。",
+    "mechanism": "规则写在配置的 rules 段，每条是（类型, 匹配值, 目标）。目标可以是策略组名、DIRECT 或 REJECT。匹配自上而下，命中即停。核心类型：DOMAIN（精确）、DOMAIN-SUFFIX（后缀）、DOMAIN-KEYWORD（含关键词）、IP-CIDR（IP 段，可带 no-resolve）、GEOIP（地区库）、SRC-IP-CIDR（源地址）、DST-PORT（端口）、PROCESS-NAME（进程）、SCRIPT（脚本）、MATCH（兜底）。心智模型：规则是一张查表，从上往下翻，第一个命中的格子就是答案。",
+    "boundaries": [
+      "vs DOMAIN vs DOMAIN-SUFFIX：DOMAIN,google.com 只精确匹配这一个域名；DOMAIN-SUFFIX,google.com 匹配 google.com 和它的所有子域名。",
+      "vs IP-CIDR 带不带 no-resolve：带 no-resolve 直接用 IP 比，不触发 DNS 解析；不带则先解析域名再比 IP——影响性能和隐私。",
+      "vs GEOIP vs IP-CIDR：GEOIP 查 MaxMind 地区库，粗但覆盖面大；IP-CIDR 精确到段。",
+      "vs MATCH：MATCH 是最后兜底，没命中任何规则就走它；放在非末尾等于让所有规则失效。"
+    ],
+    "practices": [
+      "特例放前、宽泛靠后：`DOMAIN-SUFFIX,google.com` 放前面，`GEOIP,CN,DIRECT` 放后面，否则内网域名也被代理。",
+      "IP-CIDR 尽量加 no-resolve：否则匹配 IP 规则前会先解析域名，可能泄露 DNS 或拖慢。",
+      "MATCH 必须最后：它是兜底，不是第一条。",
+      "规则爆炸别慌：几百条规则性能没问题，真正影响的是顺序错误和重复。"
+    ],
+    "example": "`rules: - DOMAIN-SUFFIX,google.com,PROXY - DOMAIN-SUFFIX,github.com,PROXY - GEOIP,CN,DIRECT - MATCH,PROXY`——google/github 走代理，中国 IP 直连，其余全部代理。它的另一半：把 MATCH 改成 DIRECT，未命中的流量就会直连——同一套规则，兜底不同，行为完全不同。",
+    "subTopics": ["DOMAIN / SUFFIX / KEYWORD", "IP-CIDR 与 no-resolve", "GEOIP", "MATCH 兜底", "规则顺序", "SRC-IP-CIDR / DST-PORT / PROCESS-NAME"]
+  },
+  {
+    "id": "fakeip",
+    "keywordId": "fakeip",
+    "judgment": "FakeIP 是「让代理永远看得到域名」的机制——它用虚拟地址骗过系统解析，真正的解析发生在代理端，代价是你必须保证所有 DNS 都走对路径，否则就泄露。",
+    "why": "真实 IP 泄露是代理用户最怕的事：DNS 查询直连上游，域名暴露给 ISP。FakeIP 方案让 DNS 查询统一返回地址池里的虚拟 IP（如 198.18.0.0/16），域名信息保留给规则引擎，真实解析在代理端完成——既避免泄露，也让规则始终能按域名分流。",
+    "mechanism": "配置 dns.fake-ip-range 后，任何域名查询返回池中虚拟地址；数据包目标为虚拟 IP 时，内核把连接映射回域名，规则按域名匹配出站；代理节点真正连接时再解析真实 IP。心智模型：FakeIP 是「先给你一个假的地址占位，真正的家在代理端」。",
+    "boundaries": [
+      "vs 普通 DNS：普通模式返回真实 IP，域名信息在本地就消费掉了；FakeIP 把域名留到代理端。",
+      "vs DNS 污染防护：污染防护是换解析路径（走可靠上游）；FakeIP 是换解析策略（统一虚拟地址）。",
+      "vs 直连解析：直连解析会暴露查询；FakeIP 隐藏查询内容，但要求流量本身走代理。"
+    ],
+    "practices": [
+      "DNS 必须全走代理路径：任何绕过 fake-ip 的查询（如 UDP 直连到 8.8.8.8）都会泄露并破坏分流。",
+      "fake-ip-filter 只放行必须例外的：内网、本地服务等少数域名；放行太多等于把流量引回直连。",
+      "分流错误会泄露：规则把请求导向 DIRECT 时，FakeIP 的虚拟地址会让直连失败或回落到错误路径。",
+      "别在 fake-ip 模式期望看到真实 IP：工具里显示的是虚拟地址，这是设计行为不是 bug。"
+    ],
+    "example": "配置 `dns: enable: true fake-ip-range: 198.18.0.1/16` 后，查询 `google.com` 返回 198.18.x.x 虚拟地址；连接这个地址时，clash 知道它是 google.com，规则引擎按域名分流，代理端再解析真实 IP。它的另一半：如果 DNS 查询没走这个过滤链（比如系统 resolver 直连），返回的就是真实 IP——规则退化、域名暴露，FakeIP 的保护就白做了。",
+    "subTopics": ["fake-ip-range", "DNS 解析链", "泄露场景", "fake-ip-filter", "分流与直连"]
+  },
+  {
+    "id": "proxy-deploy",
+    "keywordId": "proxy-deploy",
+    "judgment": "服务器代理部署不是「把配置复制过去」，而是「让一台服务器变成稳定出口」——选点、容灾、常驻、校验四件事缺一不可。",
+    "why": "当你要「服务器自身能科学上网」或「本地与服务器出口一致」时，就得把节点部署到远程服务器。大多数人死在两处：节点失效没有自动切换、服务没常驻服务器一重启就没了。",
+    "mechanism": "部署流程：① 从订阅按地区/延迟挑选节点；② 生成服务端配置：proxies（选中节点）+ 一个 fallback 策略组（url-test 定期检测，主节点故障自动切备用）+ 出站规则全走该组；③ SSH 上传；④ systemd 注册为常驻服务（mihomo/clash 内核监听）；⑤ 校验出口 IP。心智模型：fallback 是「备胎策略组」，url-test 是它的体检医生。",
+    "boundaries": [
+      "vs 本地代理：本地代理的节点在本地连接；服务器部署是节点在服务器端连接，服务器变成出口。",
+      "vs 直接 SSH 隧道：SSH -D 是临时动态代理；服务器部署是常驻服务，带容灾和自动重启。",
+      "vs 手动 ssh 挂起：nohup 起个进程容易忘；systemd 保证开机自启和崩溃恢复。"
+    ],
+    "practices": [
+      "fallback 必须有健康检查：没有 url-test 的 fallback 是摆设，主节点挂了不会自动切。",
+      "选节点别只看延迟：看地区、看协议兼容、看有没有历史断流。",
+      "systemd 记得配 Restart=on-failure：否则进程崩了要手动拉。",
+      "出口 IP 校验不能省：curl 出口地址确认走了预期地区节点，否则等于白配。"
+    ],
+    "example": "服务端 mihomo 配置里 `proxy-groups: - name: PROXY type: fallback proxies: [jp1, jp2, sg1] url: http://www.gstatic.com/generate_204 interval: 300`——fallback 组定期测 jp1/jp2/sg1，主节点 jp1 挂自动切 jp2。它的另一半是 systemd：`Restart=on-failure` 保证 mihomo 崩了自动拉起——容灾 + 常驻，才是一个可用的出口。",
+    "subTopics": ["节点选点", "fallback 容灾", "systemd 常驻", "出口 IP 校验", "订阅解析"]
+  },
+  {
+    "id": "linux-netstack",
+    "keywordId": "linux-netstack",
+    "judgment": "Linux 网络栈是「数据包在内核里的流水线」——eBPF 和 iptables 的钩子只是这条流水线上的几个工位，不理解整条线，钩子的意义就打折。",
+    "why": "学 eBPF 会撞到 XDP，学 iptables 会撞到 PREROUTING——它们都是网络栈某个阶段的钩子。不先知道包从网卡到 socket 的完整路径，你对「钩子在哪、能做什么」就没有直觉。这是所有网络相关内核知识的底盘。",
+    "mechanism": "收包路径：① 网卡中断触发 NAPI 轮询批量收包；② 分配 sk_buff（网络包核心结构，各协议层头指针）；③ 链路层 → IP 层（校验、分片重组、查路由表 FIB 决定本地还是转发）→ 传输层（TCP/UDP，端口匹配 socket）；④ 全程经过 netfilter 钩子（PREROUTING 在路由前、INPUT/FORWARD/OUTPUT 等）；⑤ 数据入 socket 接收队列，应用 read 取走。发包反向：socket → OUTPUT 钩子 → 路由 → POSTROUTING → 网卡。心智模型：sk_buff 是流水线上的托盘，各层协议往托盘里贴标签。",
+    "boundaries": [
+      "vs 用户态网络：内核栈处理所有协议；用户态网络（DPDK）绕过内核直达网卡，牺牲通用性换性能。",
+      "vs netfilter vs tc：netfilter 在协议栈的钩子（iptables）；tc 在网卡队列层做流量控制；XDP 在网卡驱动入口更早。",
+      "vs 路由 vs iptables：路由表（FIB）决定包往哪走；iptables 决定放不放行、改不改——先路由后过滤（PREROUTING 在路由前）。"
+    ],
+    "practices": [
+      "sk_buff 的头指针移动是核心操作：各层协议通过移动头指针访问自己的头部，理解这个就不困惑「为什么一个包这么多指针」。",
+      "NAPI 是中断与轮询的折中：高流量下轮询避免中断风暴，低流量回中断——别以为网卡收包全靠中断。",
+      "路由决定在过滤之前：PREROUTING 先于路由决策，所以「包到哪去」在 INPUT/FORWARD 之前就被路由定了。",
+      "大包会分片重组：MTU 相关的坑多半在分片和重组上。"
+    ],
+    "example": "`curl` 一个网页的收包路径：网卡中断 → NAPI → sk_buff → IP 校验 → 路由查表（本机）→ TCP 端口匹配 → INPUT 链 → socket → curl read。它的另一半是服务器转发场景：同样的包在 FORWARD 链被决定转发而非本机消费——同一个栈，INPUT 与 FORWARD 决定了「自己用还是转出去」。",
+    "subTopics": ["NAPI", "sk_buff", "协议栈", "路由 FIB", "netfilter 钩子", "TCP 状态机"]
+  },
+  {
+    "id": "cpp-move-rust-ownership",
+    "keywordId": "cpp-move-rust-ownership",
+    "judgment": "C++ 的移动是「你允许我把东西搬走」，Rust 的移动是「东西本来就只有一个主人，搬走是唯一出路」——前者靠约定保证正确性，后者靠编译器。",
+    "why": "两个语言都处理同一个问题：避免深拷贝、转移资源所有权。但解决哲学完全不同。搞混它们，你会在 C++ 里写出「移后还在用」的悬垂，或在 Rust 里被 borrow checker 教育到怀疑人生。理解这个对比，等于同时理解了两门语言对「值」的态度。",
+    "mechanism": "C++11 引入右值引用 && 和 std::move：移动构造/赋值把资源「偷」过来，避免拷贝；但对象移后仍存在，处于「合法但未定义」状态，RAII 保证它析构时安全，程序员负责不再使用它。Rust 的所有权是语言规则：每个值有唯一 owner，赋值/传参默认就是 move（除非类型实现 Copy），移动后原绑定在编译期即失效，借用检查器保证无悬垂、无双释放。心智模型：C++ 是「快递可以转手，但要你确认」，Rust 是「快递只有一个收件人，系统帮你盯着」。",
+    "boundaries": [
+      "vs 拷贝语义：C++ 默认拷贝（浅拷贝有坑，深拷贝靠写）；Rust 默认 move，Copy 类型才拷贝。",
+      "vs unique_ptr：unique_ptr 是 C++ 对「唯一所有权」的运行时 RAII 封装；Rust 的 Box 是语言级的所有权，且编译器保证。",
+      "vs 借用 vs 引用：C++ 引用不检查生命周期（悬垂是 UB）；Rust 借用检查器在编译期保证引用不过期。",
+      "vs 移动后状态：C++ 移后对象可重新赋值、必须可析构；Rust 移后绑定直接不可用（编译器拒绝）。"
+    ],
+    "practices": [
+      "C++ 移后对象是「僵尸」：访问它通常不报错但行为未定义——这是最难 debug 的坑，别依赖移后状态。",
+      "std::move 不移动任何东西：它只是把左值转成右值引用，真正的移动发生在移动构造函数/赋值里——误以为 move 就免拷贝是常见误解。",
+      "Rust 里别跟 borrow checker 对抗：它禁止的是真 bug（数据竞争、悬垂），调整数据结构（所有权转移 vs 借用）通常比绕开它更干净。",
+      "C++ 返回值优化（RVO）让很多 move 实际不发生：别为了「避免拷贝」写一堆 std::move 反而阻碍优化。"
+    ],
+    "example": "C++：`std::vector<int> a = {1,2,3}; auto b = std::move(a); // a 现在是空壳，别再用它`。Rust：`let a = vec![1,2,3]; let b = a; // 编译后 a 不再可用，用 a 会直接编译错误`。同样是把容器搬走，C++ 靠你自觉不碰 a，Rust 靠编译器在你还想碰 a 的那一行当场报错——这就是「约定 vs 保证」的全部差异。",
+    "subTopics": ["右值引用与 std::move", "移动构造/赋值", "RAII", "所有权", "借用与生命周期", "move vs copy", "Box 与 unique_ptr", "编译期保证 vs 运行时约定"]
+  }
+]

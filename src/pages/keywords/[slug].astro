@@ -1,0 +1,65 @@
+---
+import keywords from '../../content/keywords.json'
+import notes from '../../content/notes.json'
+import books from '../../content/books.json'
+import '../../styles/global.css'
+
+export function getStaticPaths() {
+  return keywords.map((k) => ({ params: { slug: k.id }, props: { keyword: k } }))
+}
+
+const { keyword } = Astro.props
+const note = notes.find((n) => n.keywordId === keyword.id)
+const relatedKeywords = (keyword.related || []).map((id) => keywords.find((k) => k.id === id)).filter(Boolean)
+const relatedBooks = (keyword.books || []).map((id) => books.find((b) => b.id === id)).filter(Boolean)
+const base = import.meta.env.BASE_URL
+---
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f3eee4" />
+    <title>{keyword.title} — Knowledge Atlas</title>
+  </head>
+  <body>
+    <div class="page-shell">
+      <p class="breadcrumb"><a href={`${base}`}>Atlas</a> › 关键词 › {keyword.title}</p>
+      <main class="note">
+        <span class="cat">{keyword.category}</span>
+        <h1>{keyword.title}</h1>
+        {note && (
+          <>
+            <p class="judgment">{note.judgment}</p>
+            <h2>为什么值得知道</h2>
+            <p>{note.why}</p>
+            <h2>核心机制</h2>
+            <p>{note.mechanism}</p>
+            <h2>与相邻概念的边界</h2>
+            <ul>{note.boundaries.map((b) => <li>{b}</li>)}</ul>
+            <h2>实际用法与坑</h2>
+            <ul>{note.practices.map((p) => <li>{p}</li>)}</ul>
+            <h2>一眼看懂的例子</h2>
+            <p>{note.example}</p>
+            <h2>子关键词</h2>
+            <div class="subtopics">{note.subTopics.map((s) => <span class="chip">{s}</span>)}</div>
+          </>
+        )}
+        {relatedBooks.length > 0 && (
+          <section>
+            <h2>相关书籍</h2>
+            <div class="subtopics">{relatedBooks.map((b) => <span class="chip">{b.title}</span>)}</div>
+          </section>
+        )}
+        {relatedKeywords.length > 0 && (
+          <section>
+            <h2>关联关键词</h2>
+            <div class="links">{relatedKeywords.map((k) => <a href={`${base}keywords/${k.id}/`}>{k.title}</a>)}</div>
+          </section>
+        )}
+        <p style="margin-top:32px"><a href={`${base}`}>← 返回 Atlas</a></p>
+      </main>
+      <footer class="site-footer">Knowledge Atlas · {keyword.title}</footer>
+    </div>
+  </body>
+</html>
