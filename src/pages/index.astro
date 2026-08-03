@@ -28,7 +28,6 @@ const statusClass = { reading: 'bstatus--reading', done: 'bstatus--done', recomm
 const shelfBooks = [...books].sort(
   (a, b) => statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status)
 )
-const total = keywords.length
 const shelfCount = shelfBooks.length
 const readingCount = books.filter((b) => b.status === 'reading').length
 ---
@@ -60,17 +59,11 @@ const readingCount = books.filter((b) => b.status === 'reading').length
     </header>
 
     <div class="page-shell">
-      <section class="atlas-intro">
-        <span class="eyebrow">Knowledge Atlas</span>
-        <h1>一个关键词，一篇文章。</h1>
-        <p class="lede">
-          {total} 个主题，每个主题一篇像人写的深度笔记——从背景、原理到原理的原理，再到能落地的命令与坑。按分类从上往下读，或按 <kbd>⌘K</kbd> 过滤。
-        </p>
-      </section>
-
       <div class="filter-row">
-        <input id="filter" type="search" placeholder="过滤关键词、子词…" autocomplete="off" aria-label="站内过滤" />
-        <span class="filter-hint">⌘K</span>
+        <span class="search-wrap">
+          <input id="filter" type="search" placeholder="搜索关键词、子词…" autocomplete="off" aria-label="站内搜索" />
+          <span class="filter-hint">⌘K</span>
+        </span>
         <span id="filter-count" class="filter-count" aria-live="polite"></span>
       </div>
       <p id="search-empty" class="search-empty" hidden>没有匹配的结果，换个词试试。</p>
