@@ -19,11 +19,7 @@ const catIcon = { 'Linux 内核': '🐧', '网络': '🌐', '代理': '🔀', 'K
     <meta name="description" content="独立知识站：每个关键词都有一篇像人写的文章，从背景、原理到原理的原理，以及可深入的子词与书籍。" />
   </head>
   <body>
-    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-      <defs>
-        <filter id="goo"><feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur"/><feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -8" result="goo"/><feComposite in="SourceGraphic" in2="goo" operator="atop"/></filter>
-      </defs>
-    </svg>
+    <canvas id="cursor-canvas" aria-hidden="true"></canvas>
     <header class="site-header">
       <div class="nav-shell">
         <a class="wordmark" href="https://zoeimport.github.io/">ZoeImport<span>.</span></a>
@@ -35,22 +31,16 @@ const catIcon = { 'Linux 内核': '🐧', '网络': '🌐', '代理': '🔀', 'K
       </div>
     </header>
     <div class="page-shell">
-      <header class="atlas-hero">
-        <canvas id="hero-canvas" aria-hidden="true"></canvas>
-        <div class="goo" aria-hidden="true">
-          <span class="blob b1"></span>
-          <span class="blob b2"></span>
-          <span class="blob b3"></span>
-        </div>
+      <header class="page-top">
         <span class="eyebrow">Knowledge Atlas</span>
         <h1>关键词与笔记<em>.</em></h1>
         <p>每个词都有一篇像人写的文章：背景、原理、原理的原理，以及能继续深入的子词和该读的书。</p>
+        <div class="search" data-base={base}>
+          <input id="search-box" type="search" placeholder="搜索关键词、子词、书籍…" autocomplete="off" aria-label="站内搜索" />
+          <span class="hint">Ctrl K</span>
+          <div id="search-results" class="search-results"></div>
+        </div>
       </header>
-      <div class="search" data-base={base}>
-        <input id="search-box" type="search" placeholder="搜索关键词、子词、书籍…" autocomplete="off" aria-label="站内搜索" />
-        <span class="hint">Ctrl K</span>
-        <div id="search-results" class="search-results"></div>
-      </div>
       <main>
         {categories.map((cat) => (
           <section class="category reveal">
@@ -134,46 +124,43 @@ const catIcon = { 'Linux 内核': '🐧', '网络': '🌐', '代理': '🔀', 'K
         }), { threshold: 0.1 })
         els.forEach((el) => io.observe(el))
       })()
-      // ---------- Hero 气泡 ----------
+      // ---------- 鼠标追踪气泡 ----------
       (() => {
-        const cv = document.getElementById('hero-canvas')
+        const cv = document.getElementById('cursor-canvas')
         if (!cv || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
         const ctx = cv.getContext('2d')
         const dpr = Math.min(window.devicePixelRatio || 1, 2)
         let W = 0, H = 0
-        const resize = () => {
-          const r = cv.parentElement.getBoundingClientRect()
-          W = r.width; H = r.height
-          cv.width = W * dpr; cv.height = H * dpr
-          ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-        }
+        const resize = () => { W = window.innerWidth; H = window.innerHeight; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0) }
         resize()
         window.addEventListener('resize', resize)
-        const N = Math.max(14, Math.floor(W / 40))
-        const bubbles = Array.from({ length: N }, () => ({
-          x: Math.random() * W,
-          y: H + Math.random() * H,
-          r: 3 + Math.random() * 14,
-          v: 0.12 + Math.random() * 0.35,
-          o: 0.05 + Math.random() * 0.16,
-          sway: Math.random() * Math.PI * 2
-        }))
+        const bubbles = []
+        const MAX = 40
+        let mx = -100, my = -100
+        window.addEventListener('mousemove', (e) => {
+          mx = e.clientX; my = e.clientY
+          if (bubbles.length < MAX) {
+            bubbles.push({ x: mx + (Math.random() - 0.5) * 8, y: my, r: 2 + Math.random() * 8, v: 0.35 + Math.random() * 0.6, o: 0.22 + Math.random() * 0.18, sway: Math.random() * Math.PI * 2 })
+          }
+        })
         let t = 0
         const loop = () => {
-          t += 0.01
+          t += 0.02
           ctx.clearRect(0, 0, W, H)
-          for (const b of bubbles) {
+          if (mx > 0) {
+            ctx.beginPath(); ctx.arc(mx, my, 4, 0, Math.PI * 2)
+            ctx.fillStyle = 'rgba(168,92,60,0.45)'; ctx.fill()
+          }
+          for (let i = bubbles.length - 1; i >= 0; i--) {
+            const b = bubbles[i]
             b.y -= b.v
-            b.x += Math.sin(t * 2 + b.sway) * 0.25
-            if (b.y < -b.r * 2) { b.y = H + b.r; b.x = Math.random() * W }
-            ctx.beginPath()
-            ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2)
-            ctx.fillStyle = 'rgba(168,92,60,' + b.o + ')'
-            ctx.fill()
-            ctx.beginPath()
-            ctx.arc(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.28, 0, Math.PI * 2)
-            ctx.fillStyle = 'rgba(255,255,255,' + (b.o * 0.8) + ')'
-            ctx.fill()
+            b.x += Math.sin(t * 2 + b.sway) * 0.3
+            b.o -= 0.004
+            if (b.o <= 0) { bubbles.splice(i, 1); continue }
+            ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2)
+            ctx.fillStyle = 'rgba(168,92,60,' + b.o.toFixed(3) + ')'; ctx.fill()
+            ctx.beginPath(); ctx.arc(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.26, 0, Math.PI * 2)
+            ctx.fillStyle = 'rgba(255,255,255,' + (b.o * 0.7).toFixed(3) + ')'; ctx.fill()
           }
           requestAnimationFrame(loop)
         }

@@ -82,23 +82,17 @@ mark { background: #f5e0a8; color: inherit; padding: 0 1px; border-radius: 2px; 
 .primary-nav a:hover { color: var(--clay-hover); }
 .primary-nav a[aria-current] { color: var(--ink); }
 
-/* ---------- Hero ---------- */
-.atlas-hero { padding: 64px 0 30px; border-bottom: 1px solid var(--border-faint); margin-bottom: 24px; position: relative; overflow: hidden; }
-.atlas-hero::before { content: ""; position: absolute; inset: 0; z-index: 0; background: radial-gradient(circle at 18% 28%, rgb(168 92 60 / 13%), transparent 45%), radial-gradient(circle at 84% 72%, rgb(102 121 107 / 9%), transparent 42%); animation: bg-drift 18s var(--ease-out-quart) infinite alternate; }
-@keyframes bg-drift { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(-2%,2%,0) scale(1.06); } }
-#hero-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
-.goo { position: absolute; top: -50px; right: 6%; width: 190px; height: 190px; filter: url(#goo); pointer-events: none; opacity: .55; z-index: 1; }
-.atlas-hero .eyebrow, .atlas-hero h1, .atlas-hero p { position: relative; z-index: 2; }
-.blob { position: absolute; border-radius: 50%; will-change: transform; }
-.b1 { width: 74px; height: 74px; background: #eed7c0; top: 44px; left: 8px; animation: blob-drift 9s var(--ease-out-quart) infinite; }
-.b2 { width: 48px; height: 48px; background: #f5e2d2; top: 96px; left: 74px; animation: blob-drift 11s var(--ease-out-quart) infinite reverse; }
-.b3 { width: 34px; height: 34px; background: var(--clay); opacity: .55; top: 18px; left: 96px; animation: blob-drift 7s var(--ease-out-quart) infinite; }
-@keyframes blob-drift { 0%,100% { transform: translate(0,0) scale(1); } 33% { transform: translate(16px,-20px) scale(1.06); } 66% { transform: translate(-12px,12px) scale(.96); } }
-.atlas-hero .eyebrow { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--clay-deep); }
-.atlas-hero h1 { font-size: clamp(32px, 4.5vw, 44px); margin: 10px 0 12px; animation: rise 650ms var(--ease-out-quart) both; }
-.atlas-hero h1 em { color: var(--clay); font-style: normal; }
-.atlas-hero p { color: var(--text-muted); max-width: 60ch; animation: rise 650ms var(--ease-out-quart) 90ms both; }
+/* ---------- 顶部区(独立搜索框,无 banner) ---------- */
+.page-top { padding: 44px 0 6px; }
+.page-top .eyebrow { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--clay-deep); }
+.page-top h1 { font-size: clamp(28px, 3.6vw, 38px); margin: 8px 0 10px; animation: rise 600ms var(--ease-out-quart) both; }
+.page-top h1 em { color: var(--clay); font-style: normal; }
+.page-top p { color: var(--text-muted); max-width: 62ch; margin: 0 0 22px; animation: rise 600ms var(--ease-out-quart) 80ms both; }
+.page-top .search { max-width: 660px; margin: 0 0 4px; animation: rise 600ms var(--ease-out-quart) 140ms both; }
 @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+/* ---------- 鼠标追踪气泡 ---------- */
+#cursor-canvas { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; }
 
 .page-shell { max-width: var(--max); margin: 0 auto; padding: 0 24px 64px; }
 
