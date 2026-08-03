@@ -153,14 +153,26 @@ mark { background: #f5e0a8; color: inherit; padding: 0 1px; border-radius: 2px; 
 }
 
 .filter-row input {
-  flex: 0 1 360px;
-  padding: 9px 16px;
-  font: 400 14px var(--sans);
+  flex: 0 1 300px;
+  min-width: 0;
+  padding: 8px 16px;
+  font: 400 13px var(--sans);
   color: var(--ink);
   background: transparent;
   border: 1px solid var(--line);
   border-radius: 999px;
+  appearance: none;
+  -webkit-appearance: none;
   transition: border-color 180ms var(--ease);
+}
+
+/* 去掉 type="search" 的原生放大镜/清除按钮,防止输入框被撑大 */
+.filter-row input::-webkit-search-cancel-button,
+.filter-row input::-webkit-search-decoration,
+.filter-row input::-webkit-search-results-button,
+.filter-row input::-webkit-search-results-decoration {
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .filter-row input::placeholder { color: var(--muted); opacity: 0.7; }
@@ -592,6 +604,9 @@ pre.codeblock .ln {
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 720px) {
+  .filter-row { flex-wrap: wrap; }
+  .filter-row input { flex: 1 1 100%; }
+  .filter-row .filter-hint { display: none; }
   .krow, .bookrow { grid-template-columns: 44px minmax(0, 1fr); }
   .krow .ktags, .bookrow .bnote { grid-column: 2; justify-content: flex-start; padding-top: 2px; }
   .footer-shell { flex-direction: column; align-items: flex-start; }
