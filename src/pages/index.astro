@@ -6,10 +6,31 @@ import '../styles/global.css'
 
 const noteFor = (id) => notes.find((n) => n.keywordId === id)
 const base = import.meta.env.BASE_URL
-const catIcon = { 'Linux 内核': '🐧', '网络': '🌐', '代理': '🔀', 'Kubernetes': '☸️', '语言': '🧬' }
 const catOrder = ['Linux 内核', '网络', '代理', 'Kubernetes', '语言']
 const rank = (cat) => (catOrder.indexOf(cat) === -1 ? 99 : catOrder.indexOf(cat))
-const sorted = [...keywords].sort((a, b) => rank(a.category) - rank(b.category))
+const ordered = [...keywords].sort(
+  (a, b) => rank(a.category) - rank(b.category) || keywords.indexOf(a) - keywords.indexOf(b)
+)
+const clusters = catOrder
+  .map((cat) => ({ cat, items: ordered.filter((k) => k.category === cat) }))
+  .filter((c) => c.items.length)
+
+// 每本书 → 第一个引用它的关键词(让书单与知识网连通)
+const bookRef = {}
+for (const k of ordered) {
+  const note = noteFor(k.id)
+  for (const b of note?.books || []) if (!(b.id in bookRef)) bookRef[b.id] = k.id
+}
+
+const statusOrder = ['reading', 'done', 'recommended']
+const statusLabel = { reading: '在读', done: '已读', recommended: '待读' }
+const statusClass = { reading: 'bstatus--reading', done: 'bstatus--done', recommended: 'bstatus--to-read' }
+const shelfBooks = [...books].sort(
+  (a, b) => statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status)
+)
+const total = keywords.length
+const shelfCount = shelfBooks.length
+const readingCount = books.filter((b) => b.status === 'reading').length
 ---
 <!doctype html>
 <html lang="zh-CN">
@@ -17,153 +38,137 @@ const sorted = [...keywords].sort((a, b) => rank(a.category) - rank(b.category))
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f3eee4" />
-    <title>Knowledge Atlas — 关键词与笔记</title>
-    <meta name="description" content="独立知识站：每个关键词都有一篇像人写的文章，从背景、原理到原理的原理，以及可深入的子词与书籍。" />
+    <meta name="description" content="Knowledge Atlas——每个关键词一篇像人写的深度笔记:从背景、原理到原理的原理,再到能落地的命令与坑。" />
+    <meta property="og:title" content="Knowledge Atlas — 关键词笔记" />
+    <meta property="og:description" content="一个关键词,一篇文章。12 个主题,每篇从背景讲到能落地的命令与坑。" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={`https://zoeimport.github.io${base}`} />
+    <link rel="canonical" href={`https://zoeimport.github.io${base}`} />
+    <link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
+    <title>Knowledge Atlas — 关键词笔记</title>
   </head>
   <body>
-    <canvas id="cursor-canvas" aria-hidden="true"></canvas>
     <header class="site-header">
       <div class="nav-shell">
-        <a class="wordmark" href="https://zoeimport.github.io/">ZoeImport<span>.</span></a>
-        <nav class="primary-nav">
+        <a class="wordmark" href={`${base}`}>Atlas<span>.</span></a>
+        <nav class="primary-nav" aria-label="主导航">
           <a href={`${base}`} aria-current="page">Atlas</a>
           <a href="https://zoeimport.github.io/">主站</a>
           <a href="https://github.com/ZoeImport" rel="me">GitHub ↗</a>
         </nav>
       </div>
     </header>
+
     <div class="page-shell">
-      <div class="search-top">
-        <input id="search-box" type="search" placeholder="搜索关键词、子词、书籍…" autocomplete="off" aria-label="站内搜索" />
-        <span class="hint">⌘K</span>
+      <section class="atlas-intro">
+        <span class="eyebrow">Knowledge Atlas</span>
+        <h1>一个关键词，一篇文章。</h1>
+        <p class="lede">
+          {total} 个主题，每个主题一篇像人写的深度笔记——从背景、原理到原理的原理，再到能落地的命令与坑。按分类从上往下读，或按 <kbd>⌘K</kbd> 过滤。
+        </p>
+      </section>
+
+      <div class="filter-row">
+        <input id="filter" type="search" placeholder="过滤关键词、子词…" autocomplete="off" aria-label="站内过滤" />
+        <span class="filter-hint">⌘K</span>
+        <span id="filter-count" class="filter-count" aria-live="polite"></span>
       </div>
-      <p id="search-empty" class="search-empty" hidden>没有匹配的结果</p>
-      <main class="atlas-list">
-        {sorted.map((k) => {
-          const note = noteFor(k.id)
-          const search = [k.title, k.category, k.summary, ...k.tags, ...(note ? note.subTopics.map((s) => s.name) : [])].join(' ')
-          return (
-            <a class="lcard" href={`${base}keywords/${k.id}/`} data-search={search}>
-              <div class="lcard-head">
-                <span class="card-cat">{catIcon[k.category] || '📌'} {k.category}</span>
-                <span class="lcard-meta">{note ? `${note.angles.length} 角度 · ${note.subTopics.length} 子词` : ''}</span>
-              </div>
-              <h3 data-title={k.title}>{k.title}</h3>
-              <p class="lcard-summary">{k.summary}</p>
-              {note && note.subTopics.length > 0 && (
-                <div class="lcard-chips">
-                  {note.subTopics.slice(0, 5).map((s) => <span>{s.name}</span>)}
-                  {note.subTopics.length > 5 && <span class="more">+{note.subTopics.length - 5}</span>}
-                </div>
-              )}
-            </a>
+      <p id="search-empty" class="search-empty" hidden>没有匹配的结果，换个词试试。</p>
+
+      {clusters.map((c) => (
+        <section class="cluster" data-cluster>
+          <div class="cluster-head">
+            <h2>{c.cat}</h2>
+            <span class="count">{c.items.length} 个关键词</span>
+          </div>
+          {c.items.map((k, i) => {
+            const note = noteFor(k.id)
+            const search = [k.title, k.category, k.summary, ...k.tags, ...(note ? note.subTopics.map((s) => s.name) : [])].join(' ')
+            const num = String(i + 1).padStart(2, '0')
+            return (
+              <a class="krow" href={`${base}keywords/${k.id}/`} data-search={search}>
+                <span class="idx">{num}</span>
+                <span class="kbody">
+                  <h3 class="ktitle">{k.title}</h3>
+                  <p class="ksum">{k.summary}</p>
+                </span>
+                <span class="ktags">
+                  {k.tags.slice(0, 3).map((t) => <span>{t}</span>)}
+                </span>
+              </a>
+            )
+          })}
+        </section>
+      ))}
+
+      <section class="shelf">
+        <div class="shelf-head">
+          <h2>书单</h2>
+          <span class="count">{shelfCount} 本 · {readingCount} 在读</span>
+        </div>
+        {shelfBooks.map((b) => {
+          const ref = bookRef[b.id]
+          const cls = statusClass[b.status] || ''
+          const inner = (
+            <>
+              <span class={`bstatus ${cls}`}>{statusLabel[b.status] || b.status}</span>
+              <span class="kbody">
+                <span class="btitle">{b.title}</span>
+                <p class="bdetail">{b.progress || b.detail}</p>
+              </span>
+              <span class="bnote">{ref ? '↗ 关键词' : ''}</span>
+            </>
+          )
+          return ref ? (
+            <a class="bookrow" href={`${base}keywords/${ref}/`}>{inner}</a>
+          ) : (
+            <div class="bookrow">{inner}</div>
           )
         })}
-      </main>
-      <section class="shelf reveal">
-        <h2>书架 <span class="count">{books.filter((b) => b.status !== 'recommended').length} 本</span></h2>
-        <div class="bookgrid">
-          {books.filter((b) => b.status !== 'recommended').map((b) => (
-            <div class="bookcard">
-              <h3>{b.title}{b.status === 'reading' && <span class="status">running</span>}</h3>
-              {b.progress ? <p class="progress">{b.progress}</p> : <p>{b.detail}</p>}
-            </div>
-          ))}
-        </div>
       </section>
-      <footer class="site-footer">Knowledge Atlas · 关键词与笔记</footer>
     </div>
+
+    <footer class="site-footer">
+      <div class="footer-shell">
+        <div>
+          <p class="footer-title">读深一点，再读深一点。</p>
+          <p class="footer-copy">Knowledge Atlas · 关键词与笔记 · 持续生长中</p>
+        </div>
+        <nav class="footer-links" aria-label="页脚导航">
+          <a href={`${base}`}>Atlas</a>
+          <a href="https://zoeimport.github.io/">主站</a>
+          <a href="https://github.com/ZoeImport" rel="me">GitHub ↗</a>
+        </nav>
+      </div>
+    </footer>
+
     <script is:inline>
-      // ---------- 搜索:实时过滤大列表(vscode 感) ----------
+      // 过滤:按行隐藏,不做 innerHTML 重写(XSS 安全);cluster 内全部隐藏时整块收起
       (() => {
-        const box = document.getElementById('search-box')
+        const box = document.getElementById('filter')
+        const count = document.getElementById('filter-count')
         const empty = document.getElementById('search-empty')
-        const cards = Array.from(document.querySelectorAll('.lcard'))
-        const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+        const clusters = Array.from(document.querySelectorAll('.cluster'))
         const run = () => {
           const q = box.value.trim().toLowerCase()
           let shown = 0
-          for (const c of cards) {
-            const hit = !q || c.dataset.search.toLowerCase().includes(q)
-            c.style.display = hit ? '' : 'none'
-            if (hit) {
-              shown++
-              const h3 = c.querySelector('h3')
-              const title = h3.dataset.title
-              if (q) {
-                const re = new RegExp('(' + esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi')
-                h3.innerHTML = title.replace(re, '<mark>$1</mark>')
-              } else {
-                h3.innerHTML = esc(title)
-              }
-            }
+          for (const cl of clusters) {
+            let vis = 0
+            cl.querySelectorAll('.krow').forEach((r) => {
+              const hit = !q || r.dataset.search.toLowerCase().includes(q)
+              r.style.display = hit ? '' : 'none'
+              if (hit) vis++
+            })
+            cl.style.display = vis ? '' : 'none'
+            shown += vis
           }
-          empty.hidden = !(shown === 0 && q)
+          empty.hidden = !(q && shown === 0)
+          count.textContent = q ? `${shown} / ${clusters.reduce((n, c) => n + c.querySelectorAll('.krow').length, 0)}` : ''
         }
         box.addEventListener('input', run)
-        document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); box.focus() } })
-      })()
-      // ---------- 滚动渐入 ----------
-      (() => {
-        const els = document.querySelectorAll('.reveal')
-        if (!els.length) return
-        els.forEach((el) => el.classList.add('js-pending'))
-        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-          els.forEach((el) => el.classList.add('is-in')); return
-        }
-        const io = new IntersectionObserver((es) => es.forEach((e) => {
-          if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target) }
-        }), { threshold: 0.1 })
-        els.forEach((el) => io.observe(el))
-      })()
-      // ---------- 鼠标光效:光晕 + 跟随点 + 气泡 ----------
-      (() => {
-        const cv = document.getElementById('cursor-canvas')
-        if (!cv || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-        const ctx = cv.getContext('2d')
-        const dpr = Math.min(window.devicePixelRatio || 1, 2)
-        let W = 0, H = 0
-        const resize = () => { W = window.innerWidth; H = window.innerHeight; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0) }
-        resize()
-        window.addEventListener('resize', resize)
-        const bubbles = []
-        const MAX = 46
-        let tx = -200, ty = -200, x = -200, y = -200
-        window.addEventListener('mousemove', (e) => {
-          tx = e.clientX; ty = e.clientY
-          if (bubbles.length < MAX) {
-            bubbles.push({ x: tx + (Math.random() - 0.5) * 10, y: ty, r: 3 + Math.random() * 9, v: 0.5 + Math.random() * 0.8, o: 0.32 + Math.random() * 0.22, sway: Math.random() * Math.PI * 2 })
-          }
+        document.addEventListener('keydown', (e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); box.focus() }
         })
-        let t = 0
-        const loop = () => {
-          t += 0.02
-          x += (tx - x) * 0.12
-          y += (ty - y) * 0.12
-          ctx.clearRect(0, 0, W, H)
-          if (tx > -100) {
-            const g = ctx.createRadialGradient(x, y, 0, x, y, 70)
-            g.addColorStop(0, 'rgba(168,92,60,0.18)')
-            g.addColorStop(1, 'rgba(168,92,60,0)')
-            ctx.fillStyle = g
-            ctx.beginPath(); ctx.arc(x, y, 70, 0, Math.PI * 2); ctx.fill()
-            ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2)
-            ctx.fillStyle = 'rgba(168,92,60,0.5)'; ctx.fill()
-          }
-          for (let i = bubbles.length - 1; i >= 0; i--) {
-            const b = bubbles[i]
-            b.y -= b.v
-            b.x += Math.sin(t * 2 + b.sway) * 0.35
-            b.o -= 0.0028
-            if (b.o <= 0) { bubbles.splice(i, 1); continue }
-            ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2)
-            ctx.fillStyle = 'rgba(168,92,60,' + b.o.toFixed(3) + ')'; ctx.fill()
-            ctx.beginPath(); ctx.arc(b.x - b.r * 0.28, b.y - b.r * 0.28, b.r * 0.3, 0, Math.PI * 2)
-            ctx.fillStyle = 'rgba(255,255,255,' + (b.o * 0.75).toFixed(3) + ')'; ctx.fill()
-          }
-          requestAnimationFrame(loop)
-        }
-        loop()
       })()
     </script>
   </body>

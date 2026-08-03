@@ -16,6 +16,16 @@ const relatedBooks = (note && note.books || [])
   .filter((b) => b.meta)
 const base = import.meta.env.BASE_URL
 
+// 阅读路径:与首页分类顺序一致,用于「上一篇 / 下一篇」
+const catOrder = ['Linux 内核', '网络', '代理', 'Kubernetes', '语言']
+const rank = (cat) => (catOrder.indexOf(cat) === -1 ? 99 : catOrder.indexOf(cat))
+const ordered = [...keywords].sort(
+  (a, b) => rank(a.category) - rank(b.category) || keywords.indexOf(a) - keywords.indexOf(b)
+)
+const idx = ordered.findIndex((k) => k.id === keyword.id)
+const prev = idx > 0 ? ordered[idx - 1] : null
+const next = idx < ordered.length - 1 ? ordered[idx + 1] : null
+
 // 正文中首次出现的子词自动变成可悬浮术语:悬停浮出讲解
 const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const markTerms = (text, subs) => {
@@ -33,10 +43,20 @@ const markTerms = (text, subs) => {
   for (const r of ranges) {
     out += text.slice(last, r.start)
     const tip = r.s.body ? `${r.s.note} ${r.s.body}` : r.s.note
-    out += `<span class="term" tabindex="0" data-tip="${escapeHtml(tip)}">${text.slice(r.start, r.end)}</span>`
+    const cls = r.start > text.length / 2 ? 'term term-r' : 'term'
+    out += `<span class="${cls}" tabindex="0" data-tip="${escapeHtml(tip)}">${text.slice(r.start, r.end)}</span>`
     last = r.end
   }
   return out + text.slice(last)
+}
+// 代码块:>12 行自动加行号;语言标签由 CSS 呈现
+const renderCode = (code, lang) => {
+  const lines = code.replace(/\n$/, '').split('\n')
+  const numbered = lines.length > 12
+  const body = numbered
+    ? lines.map((ln, i) => `<span class="ln">${String(i + 1).padStart(2, '0')}</span>${escapeHtml(ln)}`).join('\n')
+    : escapeHtml(code.replace(/\n$/, ''))
+  return `<pre class="codeblock"${lang ? ` data-lang="${escapeHtml(lang)}"` : ''}><code>${body}</code></pre>`
 }
 // 渲染正文:``` 围栏代码块 → <pre><code>,其余文本段做术语标记
 const renderBody = (text, subs) => {
@@ -47,8 +67,7 @@ const renderBody = (text, subs) => {
     const inline = segs[i].replace(/`([^`\n]+)`/g, (m, c) => `<code class="inline-code">${escapeHtml(c)}</code>`)
     out += markTerms(inline, subs)
     if (segs[i + 2] !== undefined) {
-      const lang = segs[i + 1] || ''
-      out += `<pre class="codeblock"><code${lang ? ` data-lang="${escapeHtml(lang)}"` : ''}>${escapeHtml(segs[i + 2].replace(/\n$/, ''))}</code></pre>`
+      out += renderCode(segs[i + 2], segs[i + 1] || '')
     }
   }
   return out
@@ -60,38 +79,65 @@ const renderBody = (text, subs) => {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f3eee4" />
-    <title>{keyword.title} — Knowledge Atlas</title>
     <meta name="description" content={keyword.summary} />
+    <meta property="og:title" content={`${keyword.title} — Knowledge Atlas`} />
+    <meta property="og:description" content={keyword.summary} />
+    <meta property="og:type" content="article" />
+    <link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
+    <title>{keyword.title} — Knowledge Atlas</title>
   </head>
   <body>
     <header class="site-header">
       <div class="nav-shell">
-        <a class="wordmark" href="https://zoeimport.github.io/">ZoeImport<span>.</span></a>
-        <nav class="primary-nav">
+        <a class="wordmark" href={`${base}`}>Atlas<span>.</span></a>
+        <nav class="primary-nav" aria-label="主导航">
           <a href={`${base}`}>Atlas</a>
           <a href="https://zoeimport.github.io/">主站</a>
           <a href="https://github.com/ZoeImport" rel="me">GitHub ↗</a>
         </nav>
       </div>
     </header>
+
     <div class="page-shell">
-      <p class="breadcrumb"><a href={`${base}`}>Atlas</a> › 关键词 › {keyword.title}</p>
       <main class="note">
+        <a class="back-link" href={`${base}`}>← 返回 Atlas</a>
+
+        <header class="note-head">
+          <span class="cat">{keyword.category}</span>
+          <h1>{keyword.title}</h1>
+          <p class="opening">{note && note.opening}</p>
+          <p class="meta-line">{keyword.tags.join(' · ')}</p>
+        </header>
+
         {note ? (
           <>
-            <header class="note-head">
-              <span class="cat">{keyword.category}</span>
-              <h1>{keyword.title}</h1>
-              <p class="opening">{note.opening}</p>
-              <p class="meta-line">{keyword.tags.join(' · ')}</p>
-            </header>
-
             {(note.sections || []).map((s) => (
               <section class="note-block">
                 <h2>{s.heading}</h2>
                 <div class="section-body" set:html={renderBody(s.body, note.subTopics || [])} />
               </section>
             ))}
+
+            {note.example && (
+              <section class="note-block">
+                <h2>实战示例</h2>
+                <div class="example" set:html={renderBody(note.example, note.subTopics || [])} />
+              </section>
+            )}
+
+            {(note.subTopics || []).length > 0 && (
+              <section class="note-block">
+                <h2>子关键词</h2>
+                <div class="subtopics">
+                  {note.subTopics.map((s) => (
+                    <details class="subtopic">
+                      <summary><strong>{s.name}</strong> <span class="snote">{s.note}</span></summary>
+                      {s.body && <div class="sbody" set:html={renderBody(s.body, [])} />}
+                    </details>
+                  ))}
+                </div>
+              </section>
+            )}
 
             {(note.angles || []).length > 0 && (
               <section class="note-block">
@@ -114,17 +160,10 @@ const renderBody = (text, subs) => {
               </section>
             )}
 
-            {(note.subTopics || []).length > 0 && (
+            {note.nextSteps && (
               <section class="note-block">
-                <h2>子关键词</h2>
-                <div class="subtopics">
-                  {note.subTopics.map((s) => (
-                    <details class="subtopic">
-                      <summary><strong>{s.name}</strong> <span>{s.note}</span></summary>
-                      {s.body && <p set:html={renderBody(s.body, [])} />}
-                    </details>
-                  ))}
-                </div>
+                <h2>下一步动手做</h2>
+                <div class="nextstep" set:html={renderBody(note.nextSteps, [])} />
               </section>
             )}
 
@@ -142,20 +181,56 @@ const renderBody = (text, subs) => {
                 </div>
               </section>
             )}
+
+            {relatedKeywords.length > 0 && (
+              <section class="note-block">
+                <h2>关联关键词</h2>
+                <div class="links">
+                  {relatedKeywords.map((k) => (
+                    <a class="link-item" href={`${base}keywords/${k.id}/`}>
+                      <strong>{k.title}</strong>
+                      <span class="why">{k.summary}</span>
+                    </a>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <nav class="pager" aria-label="阅读路径">
+              {prev ? (
+                <a class="prev" href={`${base}keywords/${prev.id}/`}>
+                  <span class="dir">← 上一篇</span>
+                  <span class="t">{prev.title}</span>
+                </a>
+              ) : (
+                <span></span>
+              )}
+              {next && (
+                <a class="next" href={`${base}keywords/${next.id}/`}>
+                  <span class="dir">下一篇 →</span>
+                  <span class="t">{next.title}</span>
+                </a>
+              )}
+            </nav>
           </>
         ) : (
           <p>这篇笔记还在整理中。</p>
         )}
-
-        {relatedKeywords.length > 0 && (
-          <section class="note-block">
-            <h2>关联关键词</h2>
-            <div class="links">{relatedKeywords.map((k) => <a href={`${base}keywords/${k.id}/`}>{k.title}</a>)}</div>
-          </section>
-        )}
-        <p style="margin-top:32px"><a href={`${base}`}>← 返回 Atlas</a></p>
       </main>
-      <footer class="site-footer">Knowledge Atlas · {keyword.title}</footer>
     </div>
+
+    <footer class="site-footer">
+      <div class="footer-shell">
+        <div>
+          <p class="footer-title">读深一点，再读深一点。</p>
+          <p class="footer-copy">Knowledge Atlas · {keyword.title}</p>
+        </div>
+        <nav class="footer-links" aria-label="页脚导航">
+          <a href={`${base}`}>Atlas</a>
+          <a href="https://zoeimport.github.io/">主站</a>
+          <a href="https://github.com/ZoeImport" rel="me">GitHub ↗</a>
+        </nav>
+      </div>
+    </footer>
   </body>
 </html>

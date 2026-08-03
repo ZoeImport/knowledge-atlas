@@ -282,7 +282,7 @@
   {
     "id": "clash-schedule",
     "keywordId": "clash-schedule",
-    "opening": "打开 config.yaml 满屏找 `schedule:` 这个键,你会失望——clash/mihomo 里根本没这个顶层字段。但『每周换订阅』『5 分钟测速优选』『周一凌晨 4 点重发规则集』这些需求,却由三套节奏不同的时钟在悄悄执行:内核 `interval` 按秒,Clash Verge 按分钟,CFW 时代按小时。单位差 60 倍,抄错一个数,就是每 60 秒打一次机场订阅接口。要玩明白,先搞清楚:调度这摊活,到底谁在干。",
+    "opening": "打开 config.yaml 满屏找 `schedule:` 这个键,你会失望——clash/mihomo 里根本没这个顶层字段。但『每周换订阅』『5 分钟测速优选』『周一凌晨 4 点重发规则集』这些需求,却由三套节奏不同的时钟在悄悄执行:内核 `interval` 按秒,Clash Verge 按分钟,CFW 时代按小时。单位差 60 倍,抄错一个数,就是每 60 秒打一次机场订阅接口。而调度没有独立模块——它是内核 interval、GUI 定时与系统定时器三层各管一段的合谋,搞清每一层谁在计时、单位是什么,才不会把 60 秒当成一小时。",
     "sections": [
       {
         "heading": "三层时钟:内核、GUI、系统定时器各管一段",
@@ -462,7 +462,7 @@
   {
     "id": "fakeip",
     "keywordId": "fakeip",
-    "opening": "第一次见到 198.18.0.32 这种地址,多数人会在 dig 的输出里愣一下——它不是网关,不是 VPS,也不是哪个公网 IP。你只是 `dig @127.0.0.1 -p 1053 example.com` 了一下,内核就回了个这么个“假地址”。更魔幻的是,浏览器冲着这个假地址发起的连接,居然完整打开了 example.com。把域名变成保留段地址、用一张表记住映射、连接时再还原成域名,这套机制就是 fake-ip。",
+    "opening": "第一次 `dig @127.0.0.1 -p 1053 example.com`,返回的不是普通公网 IP,而是个既不私网也不公网的地址:198.18.0.32。这不是内核故障,是 fake-ip 在接管寻址——把域名先换成保留段的“假地址”,用一张表记住映射,连接时再还原成域名。浏览器冲着假地址发起连接,照样完整打开 example.com;代价是 IP-CIDR、GEOIP 这类按真实地址匹配的规则几乎全部失效。这套先假后真的交换,就是 fake-ip 的本质。",
     "sections": [
       {
         "heading": "redir-host 为什么会翻车:共享 IP 时代的地址反查",
@@ -880,7 +880,7 @@
       "podAntiAffinity 只保证启动时分散:节点增加后不会自动重排副本。",
       "master 节点的控制面污点别手贱删:那是控制面的保险丝。"
     ],
-    "example": "kubectl taint nodes gpu-node accelerator=gpu:NoSchedule 之后,跑一个没写 tolerations 的 Pod:kubectl describe pod 里 Events 显示 0/1 nodes are available: 1 node(s) had untolerated taint。给它加上 tolerations:[{key: accelerator, operator: Equal, value: gpu, effect: NoSchedule}] 再 Apply,Pod 立刻调度上去。一行污点挡路,一行容忍放行——调度的门禁就这么简单。",
+    "example": "打上污点,跑一个没写 tolerations 的 Pod:\n```bash\nkubectl taint nodes gpu-node accelerator=gpu:NoSchedule\nkubectl run probe --image=nginx\nkubectl describe pod probe\n# Events:0/1 nodes are available: 1 node(s) had untolerated taint\n```\n给它加上容忍度再 Apply,Pod 立刻调度上去:\n```yaml\n# pod spec 里\nspec:\n  tolerations:\n    - key: accelerator\n      operator: Equal\n      value: gpu\n      effect: NoSchedule\n```\n一行污点挡路,一行容忍放行——调度的门禁就这么简单。",
     "subTopics": [
       {
         "name": "Taint",
@@ -968,7 +968,7 @@
       "traefik 的 IngressRoute 是 CRD:不先装 CRD 就用不了,和 Ingress 是两套资源。",
       "HTTPS 自动证书靠注解:cert-manager 的 ClusterIssuer + ingress 上的 annotation 才会签发,证书 Pending 先查 issuer。"
     ],
-    "example": "minikube 上装 ingress-nginx,建一条路由:kind: Ingress,规则把 /api 指到 service-a:8080、/ 指到 service-b:80。curl http://$(minikube ip)/api 命中 service-a 的 /api 路径——注意是原样转发,路径带 /api 过去。想剥掉前缀就得加 nginx.ingress.kubernetes.io/rewrite-target: /,此时 /api/x 变成后端 /x。同一件事,traefik 用 IngressRoute + PathPrefix(`/api`) 表达,这就是两派差异的缩影。",
+    "example": "minikube 上装 ingress-nginx,建一条路由:\n```yaml\napiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: demo\nspec:\n  rules:\n    - http:\n        paths:\n          - path: /api\n            backend:\n              service: { name: service-a, port: { number: 8080 } }\n          - path: /\n            backend:\n              service: { name: service-b, port: { number: 80 } }\n```\n`curl http://$(minikube ip)/api` 命中 service-a 的 /api 路径——注意是原样转发,路径带 /api 过去。想剥掉前缀就得加 `nginx.ingress.kubernetes.io/rewrite-target: /`,此时 /api/x 变成后端 /x。同一件事,traefik 用 `IngressRoute` + `PathPrefix(/api)` 表达,这就是两派差异的缩影。",
     "subTopics": [
       {
         "name": "Ingress Controller",
@@ -1056,7 +1056,7 @@
       "accessMode 是绑定后不可变字段:想改只能重建 PVC,别硬试。",
       "云厂商盘和节点区域绑定:Pod 被调度到别的 zone 会拿不到盘,靠 topology 感知的 SC 解决。"
     ],
-    "example": "minikube 上建一个 PVC:accessModes: [ReadWriteOnce], resources.requests.storage: 5Gi, storageClassName: standard。Apply 后 kubectl get pvc 变 Bound,再看 kubectl get pv——minikube 的 hostpath provisioner 已经现场建了一块 5G 的 PV 并绑定。Pod 里 volumes 引用这个 PVC,挂载后 df -h 就是 5G。全程没手动建过任何盘,这就是 StorageClass 的动态供给。",
+    "example": "minikube 上建一个 PVC:\n```yaml\napiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: data\nspec:\n  accessModes: [ReadWriteOnce]\n  resources:\n    requests:\n      storage: 5Gi\n  storageClassName: standard\n```\nApply 后 `kubectl get pvc` 变 Bound,再看 `kubectl get pv`——minikube 的 hostpath provisioner 已经现场建了一块 5G 的 PV 并绑定。Pod 里 volumes 引用这个 PVC,挂载后 `df -h` 就是 5G。全程没手动建过任何盘,这就是 StorageClass 的动态供给。",
     "subTopics": [
       {
         "name": "PV",
