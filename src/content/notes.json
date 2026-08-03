@@ -642,92 +642,102 @@
   {
     "id": "k8s-crd",
     "keywordId": "k8s-crd",
-    "opening": "2015 年，OpenShift 想要一种叫 DeploymentConfig 的对象，Rancher 想要自己的 cattle，两家的答案出奇一致：fork kubernetes/kubernetes，改上游源码。上游当然不可能为每家的私有类型合并代码。这个『想扩展却只能 fork』的死结，逼出了 k8s 后来最值钱的机制——不动一行 apiserver 源码，apply 一份 YAML，集群里就多了一种全新的 API 资源类型。",
+    "opening": "要理解 CRD,别从 API 对象开始,从一次真实需求开始:你想在 Kubernetes 里跑一个 PostgreSQL 集群,官方词表里只有 Deployment/Service/Pod。两条路:要么手动建一堆 Deployment + StatefulSet,盯着它们,坏了手动救;要么发明一个新名词『PostgreSQLCluster』,让集群认识它,再由一个程序守着它——前者是运维,后者就是 CRD + controller,俗称 Operator。本文一路从业务用户怎么用,讲到亲手造一个 CRD,再到让它真正活起来的 controller,最后到生产级的三件套。",
     "sections": [
       {
-        "heading": "2016 年的 TPR 死得明白：零 schema 校验的代价",
-        "body": "TPR 在 2016 年 3 月的 1.2 里以 extensions/v1beta1.ThirdPartyResource 登场，是 SIG API Machinery 给『第三方想加资源类型』开的第一个口子。但它的设计处处透着敷衍：只能命名空间级、版本写死 v1、连 schema 校验都没有——用户 PUT 进去任意结构的 JSON 都能落 etcd。数据还按 TPR 自己的 namespace 存，跨命名空间 list 别扭到没法用；客户端要先 GET 到 TPR 再猜 plural 才能找到数据。1.7 里 CRD 一出来它就被标记弃用，1.8 直接移除，两套机制只在 1.7 并存过一个小版本。"
+        "heading": "先看业务用户怎么用:apply 一个自定义对象就行",
+        "body": "真实场景看 cert-manager:它向集群注册了一个叫 Certificate 的自定义资源。业务用户要 HTTPS 证书,不写任何签发逻辑,只 apply 一段声明:\napiVersion: cert-manager.io/v1\nkind: Certificate\nmetadata:\n  name: my-tls\nspec:\n  secretName: my-tls\n  dnsNames: [api.example.com]\n  issuerRef: { name: letsencrypt, kind: ClusterIssuer }\n几秒后 controller 自动向 Let's Encrypt 申请、做 ACME 校验、把证书写进 my-tls Secret。业务用户从头到尾没碰 ACME 协议——这就是 CRD 的价值:把『一个领域的操作』变成『声明式对象』,再交给 controller 履约。你也完全可以为自己业务发明一个名词,重复这个模式。"
       },
       {
-        "heading": "结构性 schema：v1 GA 最狠的一刀，也是静默丢字段的根源",
-        "body": "2019 年 6 月，Stefan Schimanski 的《Future of CRDs: Structural Schemas》定调：schema 必须收敛到 OpenAPI v3 的素子集，只留 properties、items、type、nullable 等六个构造，每个子 schema 只能选其一，根级 additionalProperties 禁止。三个 x-kubernetes-* 扩展补齐 Go 特有类型。结构性是 pruning 的前提：字段不在 schema 里就被 API server 静默裁掉，Kubeflow 1.1.0 在 1.18 装不上，就是 seldon 的 CRD 里 protocol 字段非法。"
+        "heading": "亲手造一个 CRD:一份完整 YAML 拆解",
+        "body": "造一个叫 Website 的 CRD,只有三部分:names(怎么称呼它)、scope(集群级还是命名空间级)、schema(它长什么样)。\napiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata:\n  name: websites.example.com\nspec:\n  group: example.com\n  names: { plural: websites, singular: website, kind: Website }\n  scope: Namespaced\n  versions:\n    - name: v1\n      served: true\n      storage: true\n      schema:\n        openAPIV3Schema:\n          type: object\n          properties:\n            spec:\n              type: object\n              properties:\n                image: { type: string }\n                replicas: { type: integer, minimum: 1 }\nkubectl apply -f 之后,集群就认识 websites 这个名词了:kubectl get websites 是空列表;再 kubectl apply -f 一个 website.yaml(里面写 spec.image、spec.replicas),就创建出一条自定义对象,和创建 Pod 一样能 get/describe/delete。注意:到这里还没有任何 Pod 会跑起来——CRD 只定义了『名词和它长什么样』,真正干活的人(盯着它 reconcile 的 controller)还没出场。"
       },
       {
-        "heading": "v1 那 7 条破坏性改动，升级时一条条怎么咬人",
-        "body": "1.16（2019-09-18）CRD 转正。v1 的破坏项像一张账单：openAPIV3Schema 必填且须结构性；pruning 默认开，preserveUnknownFields 被禁止；scope 无默认值；version、validation、subresources 全挪到 versions[*] 下；JSONPath 改名 jsonPath。外加一条软约束：*.k8s.io 域下的 CRD 必须带 api-approved.kubernetes.io 注解指向 API review PR。老 v1beta1 YAML 拿过来 apply 基本全红。"
+        "heading": "让 CRD 活起来:controller 与 Reconcile",
+        "body": "Controller 是盯着 Website 对象、把现实拨向 spec 的程序。用 kubebuilder 起脚手架:\nkubebuilder init --domain example.com\nkubebuilder create api --group web --version v1 --kind Website\n生成的骨架里,Reconcile 函数是这么一段循环(Website 增删改、或它管理的 Deployment 变化,都会触发一次):\nfunc (r *WebsiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {\n  var w webv1.Website\n  if err := r.Get(ctx, req.NamespacedName, &w); err != nil {\n    return ctrl.Result{}, client.IgnoreNotFound(err)\n  }\n  // 确保 spec.image + spec.replicas 对应的 Deployment 存在:没有就建,规格不对就改\n  // 把观察结果写回 status,比如 Ready: True\n  return ctrl.Result{}, r.Status().Update(ctx, &w)\n}\nmake install 把 CRD 装进集群,make run 在本地跑 controller。然后 apply 一个 Website:controller 侦测到新对象,生成对应 Deployment;删除 Website,它再回收资源。这就是『契约是 CRD,履约是 controller』的全部含义。"
       },
       {
-        "heading": "1000 个 CRD 能拖垮 apiserver：一个 zap logger 吃掉 1.5 GiB",
-        "body": "KubeCon EU 2022 上 Alper Rifat Ulucinar 讲了一个翻车：装 1000+ 个 CRD 把 apiserver 干到中断。根因——请求进 crdHandler，每个 CRD 实例化一个 NewStorage，各自建一个独立 etcd3 client，每个 client 又拉一个 zap logger。实测 1900 个 CRD 时 apiserver RSS 约 8 GiB，其中约 1.5 GiB 被这些 logger 吃掉。修复是共享单个 etcd3 client logger，v1.25 合入并 backport 到 1.22–1.24。"
+        "heading": "生产级三件套:status 条件、finalizer、webhook",
+        "body": "光有 Reconcile 还不够生产用。status 条件:把健康状态写成 conditions 数组(像 Pod 的 Ready 那样),kubectl get website 和 UI 才能读到『现在到底咋样』,否则别人只能猜。finalizer:在对象删除前先做清理(比如回收云盘),在 metadata.finalizers 里挂一个名字,Reconcile 里做完清理再移除它——finalizer 没移除,对象永远卡在 Terminating。admission webhook:复杂校验和默认值注入用 validating/mutating webhook,能跨字段校验、能自动填默认值,比内联 schema 强得多;而 CEL 校验(1.25+)把一部分规则直接写进 schema,连 webhook 服务都不用起。"
       },
       {
-        "heading": "CEL 进了 schema：『磁盘只能变大』终于不用写 webhook",
-        "body": "以前想校验『磁盘大小只能增不能减』，只能写 validating webhook。KEP-2876 从 2021 年磨到 1.25 beta、1.29 GA，把 CEL 塞进 schema：x-kubernetes-validations 里用 self 指当前值、oldSelf 指变更前值，rule: self >= oldSelf 一条表达式就表达出单调性。要注意执行成本预算——表达式写复杂了 apiserver 会拒收，报错原文是 estimated rule cost exceeds budget by factor of more than 100x，让你加 maxItems、maxLength 这类约束帮它评估。"
+        "heading": "版本演进:为什么 v1alpha1 不是稳定的",
+        "body": "CRD 的 schema 一旦成为 storage 版本,就是持久承诺:etcd 里已存的对象按旧 schema 序列化。想改结构,要么加新版本(served + storage 切过去),要么写 conversion webhook 在版本间转换。所以社区惯例:v1alpha1 明示『随时推翻』,敢改 schema;v1 才承诺稳定。升级 CRD 时最痛的坑:改 storage version 后老对象读不出来,或 schema 收紧导致老对象校验失败。多版本共存 + conversion 是唯一正路。"
       }
     ],
     "angles": [
       {
-        "name": "设计模式：声明式 YAML 生成 REST 端点",
-        "content": "CRD 是元编程：apply 一份 YAML，apiserver 进程内动态注册出 /apis 下的资源路径、etcd 存储与 OpenAPI 文档。数据面是模板，控制面由 Operator 消费。"
+        "name": "设计模式:声明式期望 + reconcile 循环",
+        "content": "用户只写想要的状态(spec),controller 把现实拨向 spec 并回写 status。kubebuilder 生成的 Reconcile 就是这个模式的模板,整个云原生生态都长这样。"
       },
       {
-        "name": "概念拆解：CRD 与 API Aggregation 两条扩展路",
-        "content": "CRD 轻量，跑在 apiextensions-apiserver 进程里；API Aggregation 重量，需独立 server。图省事选 CRD，深度定制写聚合 server。"
+        "name": "概念拆解:CRD vs CR vs controller",
+        "content": "CRD 是词表(定义名词),CR 是词表里的一条具体条目(一个 Website),controller 是履约人(保证每个 CR 符合 spec)。三者缺一,系统都不完整。"
       },
       {
-        "name": "风格架构：为可执行性砍掉 OpenAPI 的表达力",
-        "content": "结构性 schema 只保留 OpenAPI v3 的素子集。pruning、SSA、defaulting 都依赖结构可判定，表达力超标就无法保证算法正确——典型的克制设计。"
+        "name": "风格架构:Operator 的标准骨架",
+        "content": "Operator = CRD + controller + (webhook)。cert-manager、prometheus-operator、ingress-nginx 全是这套骨架——理解它就理解了半个云原生生态。"
       },
       {
-        "name": "原理分析：一个 CRD 的真实成本清单",
-        "content": "一个 CRD = 一个 REST 端点 + 一个 etcd client + 一块 OpenAPI 体积。1000+ 个时 apiserver 曾被打到 8 GiB，删除即删数据，不是免费配置项。"
+        "name": "原理分析:为什么 schema 校验只是入口安检",
+        "content": "API server 按 schema 做结构校验并 prune(丢弃未声明字段)。没声明的字段多传不报错、但也不会被存下来——所以『没报错』不等于『存住了』,这是新手最容易误判的点。"
       }
     ],
     "practices": [
-      "删 CRD 前先 kubectl get <plural> -o yaml 备份，误删不可恢复。",
-      "apply 含未知字段的实例，用 -o yaml 确认字段被静默裁剪，别信 apply 成功。",
-      "kubectl get ct 报 not found，先查 RBAC 授权，错误消息有误导性。",
-      "规划好 kind、plural、shortNames 再建，三者建后不可改，改名只能新建迁数据。",
-      "控制器只写 /status，判断需求满足看 metadata.generation。"
+      "apply CRD 前先看 schema:properties 里 type 漏写,字段会被 prune 静默丢弃,存下来就是空。",
+      "status 字段要开 subresource:CRD 里标记 status: {...} 子资源,否则客户端和 controller 抢着写会冲突。",
+      "finalizer 加了就要在 Reconcile 里负责移除:忘了移除,对象永远 Terminating。",
+      "别改 storage 版本:要加字段就加新 version + conversion webhook,硬改会读不出老对象。",
+      "controller 没跑,apply 自定义对象一样成功——只是没人履约,别以为装完 CRD 就完事了。"
     ],
-    "example": "apply 一份 v1 CRD，kind 写 CronTab、plural 写 crontabs，api-resources 多出 crontabs/ct。再 apply 实例时多写 schema 外的 privileged: true——apply 不报错，但 -o yaml 里永远看不到它，即默认 pruning。",
+    "example": "端到端走一遍:kubectl apply -f crd.yaml(Website 定义)→ kubectl apply -f my-site.yaml(spec.image: nginx, spec.replicas: 2)→ controller 侦测到新对象 → 生成 deployment/my-site(2 副本)。kubectl get website my-site 的 status 里 Ready: True。然后 kubectl delete website my-site → controller 的 finalizer 先回收 Deployment 再放行删除。全程你只声明了『我要一个 nginx 网站』,剩下全是 controller 干的。",
     "subTopics": [
       {
-        "name": "TPR（ThirdPartyResources）",
-        "note": "第一个实验方案的遗产",
-        "body": "1.2 引入、1.7 弃用、1.8 移除。没有 schema 校验、只能命名空间级、版本写死 v1。CRD 继承它零代码加资源的定位，补齐了 cluster-scope、命名 kind、校验 schema。"
+        "name": "CRD 三段式",
+        "note": "names / schema / scope",
+        "body": "names 定义怎么称呼(kind/plural),schema 定义长什么样(OpenAPI),scope 定义集群级还是命名空间级。三段决定了集群认识它的方式。"
       },
       {
-        "name": "结构性 schema",
-        "note": "v1 强制要求，pruning 的前提",
-        "body": "1.15 提出、1.16 v1 必填、1.18 强制，新增 NonStructuralSchema condition。非结构的 CRD 享受不到 explain、pruning、defaulting 和 SSA 字段级合并。"
+        "name": "CR 自定义资源",
+        "note": "词表里的一条具体条目",
+        "body": "一个 Website 实例,和 Pod 一样可以 kubectl get/apply/describe/delete。CRD 是类,CR 是对象。"
       },
       {
-        "name": "服务端裁剪（pruning）",
-        "note": "静默丢字段的真凶",
-        "body": "v1 默认开启，schema 未声明的字段写入 etcd 前被裁掉，apply 不报错。想保留须用 x-kubernetes-preserve-unknown-fields: true，preserveUnknownFields 已禁止。"
+        "name": "Reconcile 循环",
+        "note": "watch → 读 spec → 拨现实 → 写 status",
+        "body": "controller 的核心:任何相关事件触发一次 Reconcile,它读对象 spec、确保下属资源符合、把结果写回 status。kubebuilder 的 ctrl.Request 就是这个入口。"
       },
       {
-        "name": "subresources",
-        "note": "status/scale 单独走一个端点",
-        "body": "1.10 引入 status 与 scale。控制器写 status 走 /status 端点，普通 PUT 主资源时 status 变更被忽略；scale 让 HPA 能作用到 CR。generation 只在 spec 变更时 +1。"
+        "name": "kubebuilder",
+        "note": "CRD + controller 脚手架",
+        "body": "init 建项目、create api 建资源和控制器、make install 装 CRD、make run 本地跑。写 Operator 的标准起点,别从零手写 informer。"
       },
       {
-        "name": "api-approved.kubernetes.io",
-        "note": "k8s.io 域下的社区准入门槛",
-        "body": "*.k8s.io 域下的 CRD 必须带此注解指向 SIG 的 API review PR，否则创建被拒。这是社区治理不是技术限制，自己的 group（如 stable.example.com）不需要。"
+        "name": "finalizer",
+        "note": "删除前的清理钩子",
+        "body": "metadata.finalizers 里挂名字,Reconcile 做完清理再移除。没移除就永远 Terminating——最常见的 operator bug 之一。"
       },
       {
-        "name": "conversion webhook",
-        "note": "多版本 CRD 最容易踩的坑",
-        "body": "只有一个 storage 版本，其它版本读写都要转换。strategy: None 要求各版本字段一致，不一致就得 webhook。webhook 挂掉连旧版本对象都读不出来，cert-manager 升级事故的主因。"
+        "name": "status 条件",
+        "note": "健康状态的可读化",
+        "body": "conditions 数组(每个有 type/status/reason),kubectl get 和 UI 读它判断对象健康,controller 负责更新。"
+      },
+      {
+        "name": "admission webhook",
+        "note": "validating / mutating",
+        "body": "mutating 在对象写入前改它(填默认值),validating 在写入前拦它(跨字段校验)。比内联 schema 强,但要部署 webhook 服务。"
+      },
+      {
+        "name": "CEL 校验",
+        "note": "schema 内联规则",
+        "body": "1.25+ 把校验规则写进 openAPIV3Schema 的 x-kubernetes-validations,像『磁盘容量只能变大』这种规则不用起 webhook。"
       }
     ],
-    "nextSteps": "在 test 集群 apply 官方 cron-tab 的 v1 CRD，确认出现 crontabs/ct。再 apply 含未知字段的实例看被静默裁剪；加 self >= oldSelf 的 CEL 规则；删 CRD 前先备份。",
+    "nextSteps": "用 kubebuilder 从零起一个 Website 项目(init → create api → 写 30 行 Reconcile → make install && make run),apply 一个 Website 看 Deployment 被生成;再给它加 finalizer 和 status 条件,体会删除流程;最后读 cert-manager 的 Certificate CRD 定义,看生产级 schema 和条件怎么组织。",
     "books": [
       {
         "id": "k8s-action",
-        "reason": "读第 1 版 16 章看扩展 API 初衷，第 2 版 4 章补 managedFields 底座。"
+        "reason": "控制器与自定义资源章节,配合 Kubebuilder 上手,是 CRD/Operator 的实践入口。"
       }
     ]
   },

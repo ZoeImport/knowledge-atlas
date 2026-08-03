@@ -7,6 +7,7 @@ import '../styles/global.css'
 const categories = [...new Set(keywords.map((k) => k.category))]
 const noteFor = (id) => notes.find((n) => n.keywordId === id)
 const base = import.meta.env.BASE_URL
+const catIcon = { 'Linux 内核': '🐧', '网络': '🌐', '代理': '🔀', 'Kubernetes': '☸️', '语言': '🧬' }
 ---
 <!doctype html>
 <html lang="zh-CN">
@@ -23,6 +24,16 @@ const base = import.meta.env.BASE_URL
         <filter id="goo"><feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur"/><feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -8" result="goo"/><feComposite in="SourceGraphic" in2="goo" operator="atop"/></filter>
       </defs>
     </svg>
+    <header class="site-header">
+      <div class="nav-shell">
+        <a class="wordmark" href="https://zoeimport.github.io/">ZoeImport<span>.</span></a>
+        <nav class="primary-nav">
+          <a href={`${base}`} aria-current="page">Atlas</a>
+          <a href="https://zoeimport.github.io/">主站</a>
+          <a href="https://github.com/ZoeImport" rel="me">GitHub ↗</a>
+        </nav>
+      </div>
+    </header>
     <div class="page-shell">
       <header class="atlas-hero">
         <canvas id="hero-canvas" aria-hidden="true"></canvas>
@@ -31,7 +42,7 @@ const base = import.meta.env.BASE_URL
           <span class="blob b2"></span>
           <span class="blob b3"></span>
         </div>
-        <span class="eyebrow">Knowledge Atlas</span>
+        <span class="eyebrow">ZoeImport / Knowledge Atlas</span>
         <h1>关键词与笔记<em>.</em></h1>
         <p>每个词都有一篇像人写的文章：背景、原理、原理的原理，以及能继续深入的子词和该读的书。</p>
       </header>
@@ -43,19 +54,25 @@ const base = import.meta.env.BASE_URL
       <main>
         {categories.map((cat) => (
           <section class="category reveal">
-            <h2>{cat} <span class="count">{keywords.filter((k) => k.category === cat).length} 词</span></h2>
+            <h2>{catIcon[cat] || '📌'} {cat} <span class="count">{keywords.filter((k) => k.category === cat).length} 词</span></h2>
             <div class="card-grid">
               {keywords.filter((k) => k.category === cat).map((k) => {
                 const note = noteFor(k.id)
                 return (
-                  <a class="card" href={`${base}keywords/${k.id}/`}>
-                    <span class="card-cat">{k.category}</span>
-                    <h3>{k.title}</h3>
-                    <p>{k.summary}</p>
-                    <div class="card-meta">
-                      <span>{note ? note.angles.length : 0} 角度 · {note ? note.subTopics.length : 0} 子词</span>
-                      {k.tags.slice(0, 2).map((t) => <span class="tag">{t}</span>)}
+                  <a class="lcard" href={`${base}keywords/${k.id}/`}>
+                    <div class="lcard-head">
+                      <span class="card-cat">{catIcon[k.category] || '📌'} {k.category}</span>
+                      <span class="lcard-meta">{note ? `${note.angles.length} 角度 · ${note.subTopics.length} 子词` : ''}</span>
                     </div>
+                    <h3>{k.title}</h3>
+                    <p class="lcard-summary">{k.summary}</p>
+                    {note && note.subTopics.length > 0 && (
+                      <div class="lcard-chips">
+                        {note.subTopics.slice(0, 4).map((s) => <span>{s.name}</span>)}
+                        {note.subTopics.length > 4 && <span class="more">+{note.subTopics.length - 4}</span>}
+                      </div>
+                    )}
+                    <div class="card-meta">{k.tags.map((t) => <span class="tag">{t}</span>)}</div>
                   </a>
                 )
               })}
@@ -64,11 +81,11 @@ const base = import.meta.env.BASE_URL
         ))}
       </main>
       <section class="category reveal">
-        <h2>在读的书 <span class="count">{books.filter((b) => b.status === 'reading').length} 本</span></h2>
+        <h2>书架 <span class="count">{books.filter((b) => b.status !== 'recommended').length} 本</span></h2>
         <div class="bookgrid">
-          {books.filter((b) => b.status === 'reading').map((b) => (
+          {books.filter((b) => b.status !== 'recommended').map((b) => (
             <div class="bookcard">
-              <h3>{b.title}</h3>
+              <h3>{b.title} <span class="status">{b.status === 'reading' ? '在读' : '已读'}</span></h3>
               {b.progress ? <p class="progress">{b.progress}</p> : <p>{b.detail}</p>}
             </div>
           ))}
@@ -151,7 +168,7 @@ const base = import.meta.env.BASE_URL
             if (b.y < -b.r * 2) { b.y = H + b.r; b.x = Math.random() * W }
             ctx.beginPath()
             ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2)
-            ctx.fillStyle = 'rgba(217,119,87,' + b.o + ')'
+            ctx.fillStyle = 'rgba(168,92,60,' + b.o + ')'
             ctx.fill()
             ctx.beginPath()
             ctx.arc(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.28, 0, Math.PI * 2)

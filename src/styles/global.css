@@ -21,21 +21,24 @@
 }
 
 :root {
+  /* 与主站 ZoeImport.github.io 共享的设计 token */
   --paper: #f3eee4;
-  --paper-card: #f8f3ea;
-  --paper-deep: #e9e0cf;
-  --ink: #1e1b16;
-  --text-strong: #2c2823;
-  --text-body: #3d3830;
-  --text-muted: #6f6759;
-  --text-faint: #948b7b;
-  --border-faint: #e2d9c7;
-  --border-base: #d5cbb6;
-  --border-strong: #b9ac93;
-  --clay: #d97757;
-  --clay-deep: #c05c42;
-  --clay-hover: #a94c35;
-  --clay-tint: #f2ddd2;
+  --paper-card: #fffdf8;
+  --paper-deep: #e8dfd1;
+  --ink: #171713;
+  --text-strong: #2b2720;
+  --text-body: #3f3b33;
+  --text-muted: #6f6b63;
+  --text-faint: #98907f;
+  --border-faint: #ddd5c6;
+  --border-base: #ccc2b4;
+  --border-strong: #b3a892;
+  --clay: #a85c3c;
+  --clay-deep: #8f4a2e;
+  --clay-hover: #7c3f28;
+  --clay-tint: #f3e2da;
+  --sage: #66796b;
+  --max: 1240px;
   --radius-btn: 8px;
   --radius-md: 14px;
   --font-body: "Anthropic Serif", "Noto Serif SC", Georgia, "Songti SC", "STSong", serif;
@@ -48,21 +51,43 @@
 html { scroll-behavior: smooth; }
 body {
   margin: 0;
-  background: var(--paper);
+  min-width: 320px;
+  background:
+    radial-gradient(circle at 83% 5%, rgb(168 92 60 / 9%), transparent 24rem),
+    var(--paper);
   color: var(--text-body);
   font-family: var(--font-body);
   line-height: 1.8;
   letter-spacing: 0.01em;
+  text-rendering: optimizeLegibility;
 }
 h1, h2, h3, h4, h5 { font-family: var(--font-serif); color: var(--text-strong); font-weight: 600; letter-spacing: -0.015em; }
 a { color: var(--clay-deep); text-decoration: none; transition: color .2s var(--ease-out-quart); }
 a:hover { color: var(--clay-hover); }
 mark { background: #f5e0a8; color: inherit; padding: 0 1px; border-radius: 2px; }
 
+/* ---------- 顶部导航(与主站一致) ---------- */
+.site-header {
+  position: sticky; top: 0; z-index: 30;
+  border-bottom: 1px solid rgb(204 194 180 / 78%);
+  background: rgb(243 238 228 / 90%);
+  backdrop-filter: blur(8px);
+}
+.nav-shell { max-width: var(--max); margin: 0 auto; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.wordmark { font-family: var(--font-serif); font-size: 22px; color: var(--ink); line-height: 1; }
+.wordmark span { color: var(--clay); }
+.primary-nav { display: flex; gap: 18px; align-items: center; font-size: 14px; font-family: var(--font-sans); }
+.primary-nav a { color: var(--text-muted); }
+.primary-nav a:hover { color: var(--clay-hover); }
+.primary-nav a[aria-current] { color: var(--ink); }
+
 /* ---------- Hero ---------- */
 .atlas-hero { padding: 64px 0 30px; border-bottom: 1px solid var(--border-faint); margin-bottom: 24px; position: relative; overflow: hidden; }
-#hero-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.goo { position: absolute; top: -50px; right: 6%; width: 190px; height: 190px; filter: url(#goo); pointer-events: none; opacity: .55; }
+.atlas-hero::before { content: ""; position: absolute; inset: 0; z-index: 0; background: radial-gradient(circle at 18% 28%, rgb(168 92 60 / 13%), transparent 45%), radial-gradient(circle at 84% 72%, rgb(102 121 107 / 9%), transparent 42%); animation: bg-drift 18s var(--ease-out-quart) infinite alternate; }
+@keyframes bg-drift { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(-2%,2%,0) scale(1.06); } }
+#hero-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+.goo { position: absolute; top: -50px; right: 6%; width: 190px; height: 190px; filter: url(#goo); pointer-events: none; opacity: .55; z-index: 1; }
+.atlas-hero .eyebrow, .atlas-hero h1, .atlas-hero p { position: relative; z-index: 2; }
 .blob { position: absolute; border-radius: 50%; will-change: transform; }
 .b1 { width: 74px; height: 74px; background: #eed7c0; top: 44px; left: 8px; animation: blob-drift 9s var(--ease-out-quart) infinite; }
 .b2 { width: 48px; height: 48px; background: #f5e2d2; top: 96px; left: 74px; animation: blob-drift 11s var(--ease-out-quart) infinite reverse; }
@@ -74,7 +99,7 @@ mark { background: #f5e0a8; color: inherit; padding: 0 1px; border-radius: 2px; 
 .atlas-hero p { color: var(--text-muted); max-width: 60ch; animation: rise 650ms var(--ease-out-quart) 90ms both; }
 @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 
-.page-shell { max-width: 1120px; margin: 0 auto; padding: 0 24px 64px; }
+.page-shell { max-width: var(--max); margin: 0 auto; padding: 0 24px 64px; }
 
 /* ---------- 搜索 ---------- */
 .search { position: relative; max-width: 560px; margin: 0 0 28px; animation: rise 650ms var(--ease-out-quart) 160ms both; }
@@ -109,26 +134,31 @@ mark { background: #f5e0a8; color: inherit; padding: 0 1px; border-radius: 2px; 
   display: flex; align-items: baseline; gap: 10px;
 }
 .category > h2 .count { font-size: 12px; color: var(--text-faint); font-family: var(--font-sans); font-weight: 400; }
-.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
-.card {
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
+.lcard {
   display: block; background: var(--paper-card);
   border: 1px solid var(--border-faint); border-radius: var(--radius-md);
-  padding: 14px 16px; position: relative;
-  transition: border-color .2s var(--ease-out-quart), box-shadow .2s var(--ease-out-quart), transform .18s var(--ease-out-quart);
+  padding: 20px 22px; position: relative; overflow: hidden;
+  transition: border-color .2s var(--ease-out-quart), box-shadow .25s var(--ease-out-quart), transform .2s var(--ease-out-quart);
 }
-.card:hover { border-color: var(--border-strong); box-shadow: 0 0 0 1px var(--border-strong); transform: translateY(-1px); }
-.card .card-cat { font-size: 10px; letter-spacing: 0.08em; color: var(--clay-deep); text-transform: uppercase; }
-.card h3 { margin: 4px 0 6px; font-size: 16px; line-height: 1.3; }
-.card p { margin: 0 0 8px; color: var(--text-muted); font-size: 12.5px; line-height: 1.6; }
-.card .card-meta { display: flex; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--text-faint); }
-.card .card-meta .tag { border: 1px solid var(--border-faint); border-radius: 999px; padding: 1px 7px; }
-.card::after { /* 盖章微光：hover 扫过 */
-  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  background: linear-gradient(120deg, transparent 42%, rgba(255,255,255,.5) 50%, transparent 58%);
-  background-size: 220% 100%; background-position: 130% 0; opacity: 0;
-  transition: opacity .12s;
+.lcard:hover { border-color: var(--border-strong); box-shadow: 0 14px 34px rgba(30,27,22,.10), 0 0 0 1px var(--border-strong); transform: translateY(-3px); }
+.lcard .lcard-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+.lcard .card-cat { font-size: 10px; letter-spacing: 0.08em; color: var(--clay-deep); text-transform: uppercase; }
+.lcard .lcard-meta { font-size: 11px; color: var(--text-faint); white-space: nowrap; }
+.lcard h3 { margin: 2px 0 8px; font-size: 20px; line-height: 1.35; }
+.lcard .lcard-summary { margin: 0 0 12px; color: var(--text-muted); font-size: 14px; line-height: 1.7; }
+.lcard .lcard-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.lcard .lcard-chips span { background: var(--paper-deep); border: 1px solid var(--border-faint); border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--text-muted); }
+.lcard .lcard-chips span.more { color: var(--text-faint); border-style: dashed; }
+.lcard .card-meta { display: flex; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--text-faint); }
+.lcard .card-meta .tag { border: 1px solid var(--border-faint); border-radius: 999px; padding: 1px 7px; }
+.lcard::after {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--clay), #e8a26a, var(--clay));
+  background-size: 200% 100%; background-position: 100% 0; opacity: 0;
+  transition: opacity .2s var(--ease-out-quart), background-position .6s var(--ease-out-quart);
 }
-.card:hover::after { opacity: 1; background-position: -30% 0; transition: background-position .5s ease-out; }
+.lcard:hover::after { opacity: 1; background-position: 0 0; }
 
 /* ---------- 关键词子页 ---------- */
 .breadcrumb { font-size: 13px; color: var(--text-muted); margin: 24px 0 10px; }
@@ -158,6 +188,27 @@ mark { background: #f5e0a8; color: inherit; padding: 0 1px; border-radius: 2px; 
 }
 .angle h3 { margin: 0 0 6px; font-size: 15px; }
 .angle p { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.65; }
+
+/* ---------- 悬浮术语 ---------- */
+.term {
+  border-bottom: 1px dotted var(--clay);
+  color: var(--clay-deep);
+  cursor: help;
+  position: relative;
+}
+.term::after {
+  content: attr(data-tip);
+  position: absolute; bottom: 135%; left: 0; z-index: 40;
+  width: max-content; max-width: min(340px, 80vw);
+  background: var(--ink); color: var(--paper);
+  font-family: var(--font-sans); font-size: 12px; line-height: 1.6;
+  padding: 8px 12px; border-radius: 8px;
+  opacity: 0; pointer-events: none;
+  transform: translateY(5px);
+  transition: opacity .18s var(--ease-out-quart), transform .18s var(--ease-out-quart);
+}
+.term:hover::after, .term:focus::after { opacity: 1; transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) { .term::after { transition: none; } }
 
 .subtopics { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; margin-top: 8px; }
 .subtopic {
@@ -199,6 +250,7 @@ mark { background: #f5e0a8; color: inherit; padding: 0 1px; border-radius: 2px; 
 .bookgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
 .bookcard { background: var(--paper-card); border: 1px solid var(--border-faint); border-radius: var(--radius-md); padding: 12px 14px; }
 .bookcard h3 { margin: 0 0 6px; font-size: 15px; }
+.bookcard .status { font-size: 10px; font-family: var(--font-sans); font-weight: 400; color: var(--clay-deep); border: 1px solid var(--clay); border-radius: 999px; padding: 0 7px; margin-left: 6px; vertical-align: 2px; white-space: nowrap; }
 .bookcard p { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.6; }
 .bookcard .progress { color: var(--clay-deep); }
 

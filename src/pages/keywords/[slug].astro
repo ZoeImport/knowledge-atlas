@@ -15,6 +15,29 @@ const relatedBooks = (note && note.books || [])
   .map((b) => ({ reason: b.reason, meta: books.find((x) => x.id === b.id) }))
   .filter((b) => b.meta)
 const base = import.meta.env.BASE_URL
+
+// 正文中首次出现的子词自动变成可悬浮术语:悬停浮出讲解
+const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+const markTerms = (text, subs) => {
+  if (!text || !subs || !subs.length) return text
+  const sorted = [...subs].sort((a, b) => b.name.length - a.name.length)
+  const ranges = []
+  for (const s of sorted) {
+    const idx = text.indexOf(s.name)
+    if (idx === -1) continue
+    if (ranges.some((r) => idx < r.end && idx + s.name.length > r.start)) continue
+    ranges.push({ start: idx, end: idx + s.name.length, s })
+  }
+  ranges.sort((a, b) => a.start - b.start)
+  let out = '', last = 0
+  for (const r of ranges) {
+    out += text.slice(last, r.start)
+    const tip = r.s.body ? `${r.s.note} ${r.s.body}` : r.s.note
+    out += `<span class="term" tabindex="0" data-tip="${escapeHtml(tip)}">${text.slice(r.start, r.end)}</span>`
+    last = r.end
+  }
+  return out + text.slice(last)
+}
 ---
 <!doctype html>
 <html lang="zh-CN">
@@ -26,6 +49,16 @@ const base = import.meta.env.BASE_URL
     <meta name="description" content={keyword.summary} />
   </head>
   <body>
+    <header class="site-header">
+      <div class="nav-shell">
+        <a class="wordmark" href="https://zoeimport.github.io/">ZoeImport<span>.</span></a>
+        <nav class="primary-nav">
+          <a href={`${base}`}>Atlas</a>
+          <a href="https://zoeimport.github.io/">主站</a>
+          <a href="https://github.com/ZoeImport" rel="me">GitHub ↗</a>
+        </nav>
+      </div>
+    </header>
     <div class="page-shell">
       <p class="breadcrumb"><a href={`${base}`}>Atlas</a> › 关键词 › {keyword.title}</p>
       <main class="note">
@@ -41,7 +74,7 @@ const base = import.meta.env.BASE_URL
             {(note.sections || []).map((s) => (
               <section class="note-block">
                 <h2>{s.heading}</h2>
-                <p>{s.body}</p>
+                <p set:html={markTerms(s.body, note.subTopics || [])} />
               </section>
             ))}
 
