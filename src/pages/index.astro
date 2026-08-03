@@ -4,10 +4,12 @@ import notes from '../content/notes.json'
 import books from '../content/books.json'
 import '../styles/global.css'
 
-const categories = [...new Set(keywords.map((k) => k.category))]
 const noteFor = (id) => notes.find((n) => n.keywordId === id)
 const base = import.meta.env.BASE_URL
 const catIcon = { 'Linux 内核': '🐧', '网络': '🌐', '代理': '🔀', 'Kubernetes': '☸️', '语言': '🧬' }
+const catOrder = ['Linux 内核', '网络', '代理', 'Kubernetes', '语言']
+const rank = (cat) => (catOrder.indexOf(cat) === -1 ? 99 : catOrder.indexOf(cat))
+const sorted = [...keywords].sort((a, b) => rank(a.category) - rank(b.category))
 ---
 <!doctype html>
 <html lang="zh-CN">
@@ -31,46 +33,34 @@ const catIcon = { 'Linux 内核': '🐧', '网络': '🌐', '代理': '🔀', 'K
       </div>
     </header>
     <div class="page-shell">
-      <header class="page-top">
-        <span class="eyebrow">Knowledge Atlas</span>
-        <h1>关键词与笔记<em>.</em></h1>
-        <p>每个词都有一篇像人写的文章：背景、原理、原理的原理，以及能继续深入的子词和该读的书。</p>
-        <div class="search" data-base={base}>
-          <input id="search-box" type="search" placeholder="搜索关键词、子词、书籍…" autocomplete="off" aria-label="站内搜索" />
-          <span class="hint">Ctrl K</span>
-          <div id="search-results" class="search-results"></div>
-        </div>
-      </header>
-      <main>
-        {categories.map((cat) => (
-          <section class="category reveal">
-            <h2>{catIcon[cat] || '📌'} {cat} <span class="count">{keywords.filter((k) => k.category === cat).length} 词</span></h2>
-            <div class="card-grid">
-              {keywords.filter((k) => k.category === cat).map((k) => {
-                const note = noteFor(k.id)
-                return (
-                  <a class="lcard" href={`${base}keywords/${k.id}/`}>
-                    <div class="lcard-head">
-                      <span class="card-cat">{catIcon[k.category] || '📌'} {k.category}</span>
-                      <span class="lcard-meta">{note ? `${note.angles.length} 角度 · ${note.subTopics.length} 子词` : ''}</span>
-                    </div>
-                    <h3>{k.title}</h3>
-                    <p class="lcard-summary">{k.summary}</p>
-                    {note && note.subTopics.length > 0 && (
-                      <div class="lcard-chips">
-                        {note.subTopics.slice(0, 4).map((s) => <span>{s.name}</span>)}
-                        {note.subTopics.length > 4 && <span class="more">+{note.subTopics.length - 4}</span>}
-                      </div>
-                    )}
-                    <div class="card-meta">{k.tags.map((t) => <span class="tag">{t}</span>)}</div>
-                  </a>
-                )
-              })}
-            </div>
-          </section>
-        ))}
+      <div class="search-top">
+        <input id="search-box" type="search" placeholder="搜索关键词、子词、书籍…" autocomplete="off" aria-label="站内搜索" />
+        <span class="hint">⌘K</span>
+      </div>
+      <p id="search-empty" class="search-empty" hidden>没有匹配的结果</p>
+      <main class="atlas-list">
+        {sorted.map((k) => {
+          const note = noteFor(k.id)
+          const search = [k.title, k.category, k.summary, ...k.tags, ...(note ? note.subTopics.map((s) => s.name) : [])].join(' ')
+          return (
+            <a class="lcard" href={`${base}keywords/${k.id}/`} data-search={search}>
+              <div class="lcard-head">
+                <span class="card-cat">{catIcon[k.category] || '📌'} {k.category}</span>
+                <span class="lcard-meta">{note ? `${note.angles.length} 角度 · ${note.subTopics.length} 子词` : ''}</span>
+              </div>
+              <h3 data-title={k.title}>{k.title}</h3>
+              <p class="lcard-summary">{k.summary}</p>
+              {note && note.subTopics.length > 0 && (
+                <div class="lcard-chips">
+                  {note.subTopics.slice(0, 5).map((s) => <span>{s.name}</span>)}
+                  {note.subTopics.length > 5 && <span class="more">+{note.subTopics.length - 5}</span>}
+                </div>
+              )}
+            </a>
+          )
+        })}
       </main>
-      <section class="category reveal">
+      <section class="shelf reveal">
         <h2>书架 <span class="count">{books.filter((b) => b.status !== 'recommended').length} 本</span></h2>
         <div class="bookgrid">
           {books.filter((b) => b.status !== 'recommended').map((b) => (
@@ -84,31 +74,33 @@ const catIcon = { 'Linux 内核': '🐧', '网络': '🌐', '代理': '🔀', 'K
       <footer class="site-footer">Knowledge Atlas · 关键词与笔记</footer>
     </div>
     <script is:inline>
-      // ---------- 站内搜索 ----------
+      // ---------- 搜索:实时过滤大列表(vscode 感) ----------
       (() => {
-        const BASE = document.querySelector('.search').dataset.base
         const box = document.getElementById('search-box')
-        const panel = document.getElementById('search-results')
-        let index = null
+        const empty = document.getElementById('search-empty')
+        const cards = Array.from(document.querySelectorAll('.lcard'))
         const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
-        const snippet = (text, q) => {
-          const i = text.toLowerCase().indexOf(q.toLowerCase())
-          if (i < 0) return esc(text.slice(0, 60))
-          return esc(text.slice(Math.max(0, i - 18), i)) + '<mark>' + esc(text.slice(i, i + q.length)) + '</mark>' + esc(text.slice(i + q.length, i + q.length + 50))
-        }
-        fetch(BASE + 'search-index.json').then((r) => r.json()).then((d) => { index = d }).catch(() => {})
         const run = () => {
-          const q = box.value.trim()
-          if (!q || !index) { panel.innerHTML = ''; panel.classList.remove('open'); return }
-          const hits = index.filter((it) => (it.title + it.category + it.tags.join(' ') + it.summary + it.body).toLowerCase().includes(q.toLowerCase())).slice(0, 8)
-          panel.innerHTML = hits.length
-            ? hits.map((it) => '<a href="' + BASE + 'keywords/' + it.id + '/"><b>' + esc(it.title) + '</b><span class="cat">' + esc(it.category) + '</span><em>' + snippet(it.title + ' ' + it.summary + ' ' + it.body, q) + '</em></a>').join('')
-            : '<div class="empty">没有匹配的结果</div>'
-          panel.classList.add('open')
+          const q = box.value.trim().toLowerCase()
+          let shown = 0
+          for (const c of cards) {
+            const hit = !q || c.dataset.search.toLowerCase().includes(q)
+            c.style.display = hit ? '' : 'none'
+            if (hit) {
+              shown++
+              const h3 = c.querySelector('h3')
+              const title = h3.dataset.title
+              if (q) {
+                const re = new RegExp('(' + esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi')
+                h3.innerHTML = title.replace(re, '<mark>$1</mark>')
+              } else {
+                h3.innerHTML = esc(title)
+              }
+            }
+          }
+          empty.hidden = !(shown === 0 && q)
         }
         box.addEventListener('input', run)
-        box.addEventListener('keydown', (e) => { if (e.key === 'Escape') panel.classList.remove('open') })
-        document.addEventListener('click', (e) => { if (!e.target.closest('.search')) panel.classList.remove('open') })
         document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); box.focus() } })
       })()
       // ---------- 滚动渐入 ----------
@@ -124,7 +116,7 @@ const catIcon = { 'Linux 内核': '🐧', '网络': '🌐', '代理': '🔀', 'K
         }), { threshold: 0.1 })
         els.forEach((el) => io.observe(el))
       })()
-      // ---------- 鼠标追踪气泡 ----------
+      // ---------- 鼠标光效:光晕 + 跟随点 + 气泡 ----------
       (() => {
         const cv = document.getElementById('cursor-canvas')
         if (!cv || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
@@ -135,32 +127,39 @@ const catIcon = { 'Linux 内核': '🐧', '网络': '🌐', '代理': '🔀', 'K
         resize()
         window.addEventListener('resize', resize)
         const bubbles = []
-        const MAX = 40
-        let mx = -100, my = -100
+        const MAX = 46
+        let tx = -200, ty = -200, x = -200, y = -200
         window.addEventListener('mousemove', (e) => {
-          mx = e.clientX; my = e.clientY
+          tx = e.clientX; ty = e.clientY
           if (bubbles.length < MAX) {
-            bubbles.push({ x: mx + (Math.random() - 0.5) * 8, y: my, r: 2 + Math.random() * 8, v: 0.35 + Math.random() * 0.6, o: 0.22 + Math.random() * 0.18, sway: Math.random() * Math.PI * 2 })
+            bubbles.push({ x: tx + (Math.random() - 0.5) * 10, y: ty, r: 3 + Math.random() * 9, v: 0.5 + Math.random() * 0.8, o: 0.32 + Math.random() * 0.22, sway: Math.random() * Math.PI * 2 })
           }
         })
         let t = 0
         const loop = () => {
           t += 0.02
+          x += (tx - x) * 0.12
+          y += (ty - y) * 0.12
           ctx.clearRect(0, 0, W, H)
-          if (mx > 0) {
-            ctx.beginPath(); ctx.arc(mx, my, 4, 0, Math.PI * 2)
-            ctx.fillStyle = 'rgba(168,92,60,0.45)'; ctx.fill()
+          if (tx > -100) {
+            const g = ctx.createRadialGradient(x, y, 0, x, y, 70)
+            g.addColorStop(0, 'rgba(168,92,60,0.18)')
+            g.addColorStop(1, 'rgba(168,92,60,0)')
+            ctx.fillStyle = g
+            ctx.beginPath(); ctx.arc(x, y, 70, 0, Math.PI * 2); ctx.fill()
+            ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2)
+            ctx.fillStyle = 'rgba(168,92,60,0.5)'; ctx.fill()
           }
           for (let i = bubbles.length - 1; i >= 0; i--) {
             const b = bubbles[i]
             b.y -= b.v
-            b.x += Math.sin(t * 2 + b.sway) * 0.3
-            b.o -= 0.004
+            b.x += Math.sin(t * 2 + b.sway) * 0.35
+            b.o -= 0.0028
             if (b.o <= 0) { bubbles.splice(i, 1); continue }
             ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2)
             ctx.fillStyle = 'rgba(168,92,60,' + b.o.toFixed(3) + ')'; ctx.fill()
-            ctx.beginPath(); ctx.arc(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.26, 0, Math.PI * 2)
-            ctx.fillStyle = 'rgba(255,255,255,' + (b.o * 0.7).toFixed(3) + ')'; ctx.fill()
+            ctx.beginPath(); ctx.arc(b.x - b.r * 0.28, b.y - b.r * 0.28, b.r * 0.3, 0, Math.PI * 2)
+            ctx.fillStyle = 'rgba(255,255,255,' + (b.o * 0.75).toFixed(3) + ')'; ctx.fill()
           }
           requestAnimationFrame(loop)
         }

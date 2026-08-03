@@ -82,14 +82,33 @@ mark { background: #f5e0a8; color: inherit; padding: 0 1px; border-radius: 2px; 
 .primary-nav a:hover { color: var(--clay-hover); }
 .primary-nav a[aria-current] { color: var(--ink); }
 
-/* ---------- 顶部区(独立搜索框,无 banner) ---------- */
-.page-top { padding: 44px 0 6px; }
-.page-top .eyebrow { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--clay-deep); }
-.page-top h1 { font-size: clamp(28px, 3.6vw, 38px); margin: 8px 0 10px; animation: rise 600ms var(--ease-out-quart) both; }
-.page-top h1 em { color: var(--clay); font-style: normal; }
-.page-top p { color: var(--text-muted); max-width: 62ch; margin: 0 0 22px; animation: rise 600ms var(--ease-out-quart) 80ms both; }
-.page-top .search { max-width: 660px; margin: 0 0 4px; animation: rise 600ms var(--ease-out-quart) 140ms both; }
-@keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+/* ---------- 顶部搜索框(vscode 风格) ---------- */
+.search-top { position: relative; max-width: 760px; margin: 0 auto; padding: 30px 0 26px; }
+.search-top input {
+  width: 100%; padding: 14px 54px 14px 46px;
+  font-family: var(--font-body); font-size: 16px; color: var(--text-strong);
+  background: var(--paper-card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2398907f' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-4.3-4.3'/%3E%3C/svg%3E") no-repeat 16px center;
+  border: 1px solid var(--border-base); border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(23,23,19,.05);
+  transition: border-color .2s var(--ease-out-quart), box-shadow .2s var(--ease-out-quart);
+}
+.search-top input::placeholder { color: var(--text-faint); }
+.search-top input:focus { outline: none; border-color: var(--clay); box-shadow: 0 0 0 3px rgb(168 92 60 / 14%), 0 6px 20px rgba(23,23,19,.08); }
+.search-top .hint { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); font-size: 11px; font-family: var(--font-sans); color: var(--text-faint); border: 1px solid var(--border-faint); border-radius: 5px; padding: 1px 6px; }
+.search-empty { text-align: center; color: var(--text-faint); font-size: 13px; padding: 30px 0; }
+
+/* ---------- 关键词大列表 ---------- */
+.atlas-list { display: flex; flex-direction: column; gap: 12px; max-width: 920px; margin: 0 auto; }
+.atlas-list .lcard { display: block; }
+
+/* ---------- 书架 ---------- */
+.shelf { max-width: 920px; margin: 40px auto 0; }
+.shelf h2 {
+  font-size: 19px; border-bottom: 1px solid var(--border-faint);
+  border-left: 4px solid var(--clay); padding: 0 0 8px 12px; margin-bottom: 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+.shelf h2 .count { font-size: 12px; color: var(--text-faint); font-family: var(--font-sans); font-weight: 400; }
 
 /* ---------- 鼠标追踪气泡 ---------- */
 #cursor-canvas { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; }
