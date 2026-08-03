@@ -75,7 +75,7 @@ const catIcon = { 'Linux 内核': '🐧', '网络': '🌐', '代理': '🔀', 'K
         <div class="bookgrid">
           {books.filter((b) => b.status !== 'recommended').map((b) => (
             <div class="bookcard">
-              <h3>{b.title} <span class="status">{b.status === 'reading' ? '在读' : '已读'}</span></h3>
+              <h3>{b.title}{b.status === 'reading' && <span class="status">running</span>}</h3>
               {b.progress ? <p class="progress">{b.progress}</p> : <p>{b.detail}</p>}
             </div>
           ))}

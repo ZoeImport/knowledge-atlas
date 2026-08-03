@@ -114,13 +114,6 @@ const renderBody = (text, subs) => {
               </section>
             )}
 
-            {note.example && (
-              <section class="note-block">
-                <h2>一眼看懂的例子</h2>
-                <div class="example" set:html={renderBody(note.example, note.subTopics || [])} />
-              </section>
-            )}
-
             {(note.subTopics || []).length > 0 && (
               <section class="note-block">
                 <h2>子关键词</h2>
@@ -132,13 +125,6 @@ const renderBody = (text, subs) => {
                     </details>
                   ))}
                 </div>
-              </section>
-            )}
-
-            {note.nextSteps && (
-              <section class="note-block">
-                <h2>下一步</h2>
-                <p class="nextstep">{note.nextSteps}</p>
               </section>
             )}
 
