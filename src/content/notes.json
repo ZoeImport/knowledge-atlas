@@ -822,5 +822,274 @@
         "reason": "第 4 章讲三规则, 第 15 章覆盖 Rc 成环泄漏, 从设计意图而非语法出发。"
       }
     ]
+  },
+  {
+    "id": "k8s-taint-affinity",
+    "keywordId": "k8s-taint-affinity",
+    "opening": "2021 年,某团队把 GPU 节点打上 nvidia.com/gpu=true:NoSchedule 的污点,结果所有训练 Pod 卡在 Pending 一下午——因为没人给 Pod 加容忍度。调度器不是歧视,它只是把节点上的标记当命令执行:污点说『别把 Pod 放这』,容忍度说『这条命令我豁免』,亲和度说『不过我更想去那台』。三样东西加起来,才是 Kubernetes 调度器把 Pod 放到哪台机器的全部理由。",
+    "sections": [
+      {
+        "heading": "污点:节点身上的便签,调度器路过就绕行",
+        "body": "taint 是打在节点上的三件套:key、value、effect。effect 决定力度:NoSchedule 只拦新调度,PreferNoSchedule 尽量不,NoExecute 连已经跑着的都驱逐。kubectl 一行就能打:kubectl taint nodes gpu-node accelerator=gpu:NoSchedule。控制面节点默认带污点(如 node-role.kubernetes.io/control-plane),普通工作负载天然不会跑到 master 上。真实场景:给 GPU、专用 SSD、机密专区打上污点,普通流量默认不进,只有你点了名的负载才进得来。"
+      },
+      {
+        "heading": "容忍度:一张写着自己能忍什么的通行证",
+        "body": "容忍度是 Pod 身上的声明:我容忍 key=accelerator 值为 gpu、effect 为 NoSchedule 的污点。operator 有 Equal 和 Exists 两种,Exists + 空 key 等于容忍一切。致命坑:容忍度写错 key、写错 effect 或 operator 用错,调度器照样无视——它只看『这个污点有没有对应的容忍』,容忍度不会反过来强制调度器把 Pod 放上去。排错看 kubectl describe pod 的 Events,里面有 0/1 nodes are available 和 1 node(s) had untolerated taint。"
+      },
+      {
+        "heading": "亲和度:从『能不能』到『想不想』",
+        "body": "污点和容忍度回答『能不能』,亲和度回答『想不想』。nodeAffinity 分两档:requiredDuringScheduling 是硬约束(没有满足的节点就 Pending),preferredDuringScheduling 是软偏好(节点不足时照常调度,只是不优选)。podAffinity 把相关 Pod 拉近同拓扑域,podAntiAffinity 把同类副本拆散到不同节点——多副本高可用全靠它。拓扑的单位是 topologyKey:kubernetes.io/hostname 就是按节点分,topology.kubernetes.io/zone 按可用区。"
+      },
+      {
+        "heading": "三件套怎么一起用:一个真实调度决策",
+        "body": "假设订单服务要跑在 SSD 节点、和 Redis 同机、三个副本分散三台机器:给 SSD 节点打污点 ssd=true:NoSchedule 隔离普通流量,订单 Pod 加对应容忍度放行;nodeAffinity requiredDuringScheduling 限定节点标签 ssd=true;podAffinity preferred 让它和 Redis Pod 同节点;podAntiAffinity required 让三副本分到不同 hostname。硬约束先过滤出可行集,软偏好再打分,调度器选分最高的——这就是一次完整的调度决策。"
+      }
+    ],
+    "angles": [
+      {
+        "name": "设计模式:声明式约束 + 打分",
+        "content": "污点/容忍是硬约束(能或不能),亲和度 weight 是软偏好打分。调度器在硬约束过滤出的可行集里,按软偏好总分挑最优——和资源调度的 binpacking 同一套心智。"
+      },
+      {
+        "name": "概念拆解:驱逐 vs 调度约束",
+        "content": "NoSchedule 只管新调度,NoExecute 会驱逐已在跑的 Pod。作用时点不同,别把 taint 当『重启大法』——NoExecute 是会对存量负载动手的。"
+      },
+      {
+        "name": "风格架构:控制面声明,调度器执行",
+        "content": "用户只声明 Pod 的容忍与亲和,调度器在调度周期内匹配节点。声明与执行解耦,是 Kubernetes 一切资源的一致模式。"
+      },
+      {
+        "name": "原理分析:为什么容忍度不能反向强制",
+        "content": "容忍度是豁免不是要求:Pod 没写容忍度,调度器连看都不看带污点节点。所以『打了污点还是被打上』的根源,永远在 Pod 的 tolerations 字段。"
+      }
+    ],
+    "practices": [
+      "打污点前想清楚 effect:NoExecute 会立即驱逐节点上已有的 Pod,不只是拦新的。",
+      "容忍度 operator 别用 Exists + 空 key:那等于容忍所有污点,NoExecute 的驱逐也拦不住。",
+      "preferred 是『尽量』不是『必须』:节点不够时照常调度,别拿它当高可用的硬保证。",
+      "podAntiAffinity 只保证启动时分散:节点增加后不会自动重排副本。",
+      "master 节点的控制面污点别手贱删:那是控制面的保险丝。"
+    ],
+    "example": "kubectl taint nodes gpu-node accelerator=gpu:NoSchedule 之后,跑一个没写 tolerations 的 Pod:kubectl describe pod 里 Events 显示 0/1 nodes are available: 1 node(s) had untolerated taint。给它加上 tolerations:[{key: accelerator, operator: Equal, value: gpu, effect: NoSchedule}] 再 Apply,Pod 立刻调度上去。一行污点挡路,一行容忍放行——调度的门禁就这么简单。",
+    "subTopics": [
+      {
+        "name": "Taint",
+        "note": "节点污点:key/value/effect 三件套",
+        "body": "打节点上的排斥标记,effect 有 NoSchedule/PreferNoSchedule/NoExecute 三档。kubectl taint nodes <name> key=value:NoSchedule,删除用 key-。"
+      },
+      {
+        "name": "Toleration",
+        "note": "Pod 的豁免通行证",
+        "body": "Pod 声明容忍哪些污点,operator Equal 要 key+value 都对上,Exists 只看 key。容忍度是豁免,不是反向强制。"
+      },
+      {
+        "name": "NoExecute",
+        "note": "驱逐已有 Pod 的狠 effect",
+        "body": "除了拦新调度,还会驱逐已经在跑的、没写对应容忍度的 Pod。加 tolerationSeconds 可以延迟驱逐。"
+      },
+      {
+        "name": "NodeAffinity",
+        "note": "节点亲和:硬/软两档",
+        "body": "requiredDuringScheduling 是硬约束,preferredDuringScheduling 是 weight 打分。matchExpressions 用 In/NotIn/Exists 匹配节点标签。"
+      },
+      {
+        "name": "PodAffinity / AntiAffinity",
+        "note": "同组 Pod 拉近或拆散",
+        "body": "podAffinity 把相关 Pod 调度到同一拓扑域,podAntiAffinity 把副本分散。两者都基于 topologyKey 定义『多近算近』。"
+      },
+      {
+        "name": "调度打分链路",
+        "note": "硬过滤 + 软打分",
+        "body": "调度先按硬约束过滤可行节点,再按 preferred/资源均衡打分取最高。kube-scheduler 的 scoring 是可插拔的。"
+      }
+    ],
+    "nextSteps": "给一台测试节点打 taint,先跑无 toleration 的 Pod 看 Pending 与 Events;加上 toleration 看放行;再用 nodeAffinity 的 preferred 起两个 Pod,观察调度器选了哪台;最后用 podAntiAffinity 起三个副本,确认它们分散到不同节点。",
+    "books": [
+      {
+        "id": "k8s-action",
+        "reason": "读调度与亲和章节:taint/toleration/nodeAffinity 的完整字段与实战组合。"
+      }
+    ]
+  },
+  {
+    "id": "k8s-ingress",
+    "keywordId": "k8s-ingress",
+    "opening": "2015 年 Kubernetes 刚火,对外暴露服务只有 NodePort:每个服务开一个随机大端口。几百个服务就是几百个端口,运维疯了。Ingress 在 1.1 出现,把『外面怎么走进来』从每服务一个端口,变成一份路由表加一个看门的 controller。今天 nginx-ingress 和 traefik 是两个主流看门人,一个靠 annotation 抢地盘,一个靠 CRD 自立门户。",
+    "sections": [
+      {
+        "heading": "从 NodePort 到 Ingress:暴露方式的三次进化",
+        "body": "ClusterIP 只在集群内可达,跨节点访问它要靠 NodePort:在每个节点开一个 30000+ 端口转发到 Service。服务一多端口就爆炸,而且端口不语义化(31337 是谁?)。LoadBalancer 借云厂商 LB 解决端口问题,但每个服务一个 LB,贵。Ingress 是 7 层路由:一份规则表声明『/api 去 service-a、/ 去 service-b』,一个 Ingress Controller(通常 nginx/traefik Pod)读规则、做代理、暴露一个统一入口。资源只是数据,controller 才是真正干活的。"
+      },
+      {
+        "heading": "nginx-ingress:规则多到要 annotation 来救",
+        "body": "nginx-ingress 把 Ingress 规则渲染成 nginx.conf:controller 监听 API server 的资源变动,热生成配置并 reload。规则以外的能力全靠 annotation:nginx.ingress.kubernetes.io/rewrite-target 改路径、ssl-redirect 强制 HTTPS、proxy-body-size 调上传上限、canary 灰度。annotation 是字符串约定,拼错一个词静默不生效——这是它最大的坑,也是它功能最全的原因。"
+      },
+      {
+        "heading": "traefik:配置即代码,动态到可怕",
+        "body": "traefik 不靠 Ingress 规则 + annotation,它原生读 CRD:IngressRoute 是类型化资源,match 用表达式(Host(`api.example.com`) && PathPrefix(`/api`))。改路由就是 Apply 一个 CRD,不用 reload,服务发现是动态的。它还自带 Dashboard、自动 Let's Encrypt 证书。代价是得先装 CRD 才能用——traefik 选择了把『配置』做成一等公民。"
+      },
+      {
+        "heading": "Ingress 只是网关的开始:Gateway API 要接管",
+        "body": "Ingress 的痛点很实在:annotation 每个实现私有、不可移植;rewrite 这类语义各写各的,换个 controller 配置全废。Gateway API 从 2022 年开始 beta,把路由拆成 Gateway(入口)和 HTTPRoute(路由规则)两层,实现厂商(gateway controller)和路由语义分离。nginx 和 traefik 都在实现它,未来新集群值得直接上 Gateway API。"
+      }
+    ],
+    "angles": [
+      {
+        "name": "设计模式:声明式路由 + 控制器",
+        "content": "Ingress 是声明式规则表,Controller 把规则翻译成实际反向代理配置。和 CRD/controller 是同一个骨架:资源声明期望,控制器拨现实。"
+      },
+      {
+        "name": "概念拆解:Ingress 资源 vs Ingress Controller",
+        "content": "资源只是数据,controller 才是流量入口。装了 Ingress 对象没装 controller,什么都不发生——这俩必须分开记。"
+      },
+      {
+        "name": "风格架构:annotation 驱动 vs CRD 驱动",
+        "content": "nginx 用 annotation(字符串约定,灵活但不可移植),traefik 用 IngressRoute CRD(类型化,校验强)。两种扩展范式的典型对局。"
+      },
+      {
+        "name": "原理分析:为什么 Ingress 不可移植",
+        "content": "核心语义(rewrite、正则、canary)每个实现私有,写在各自 annotation 里。跨 controller 迁移等于重写路由,这正是 Gateway API 想统一的原因。"
+      }
+    ],
+    "practices": [
+      "装了 Ingress 对象但没 Ingress Controller,什么都不发生:先 kubectl get ingressclass 确认有 controller。",
+      "annotation 大小写敏感且带版本前缀:nginx.ingress.kubernetes.io 拼错静默不生效,连日志都不一定报。",
+      "rewrite-target 要用捕获组:rewrite-target: /$2 配 pathType 里的正则,否则路径被吞 404。",
+      "traefik 的 IngressRoute 是 CRD:不先装 CRD 就用不了,和 Ingress 是两套资源。",
+      "HTTPS 自动证书靠注解:cert-manager 的 ClusterIssuer + ingress 上的 annotation 才会签发,证书 Pending 先查 issuer。"
+    ],
+    "example": "minikube 上装 ingress-nginx,建一条路由:kind: Ingress,规则把 /api 指到 service-a:8080、/ 指到 service-b:80。curl http://$(minikube ip)/api 命中 service-a 的 /api 路径——注意是原样转发,路径带 /api 过去。想剥掉前缀就得加 nginx.ingress.kubernetes.io/rewrite-target: /,此时 /api/x 变成后端 /x。同一件事,traefik 用 IngressRoute + PathPrefix(`/api`) 表达,这就是两派差异的缩影。",
+    "subTopics": [
+      {
+        "name": "Ingress Controller",
+        "note": "真正看门的 Pod",
+        "body": "读 Ingress 规则并实现代理的组件,常见 nginx-ingress、traefik、haproxy-ingress。Ingress 资源本身不产生流量。"
+      },
+      {
+        "name": "nginx-ingress",
+        "note": "annotation 流派",
+        "body": "把 Ingress 渲染成 nginx.conf,热 reload。功能全但行为藏在 annotation 里,rewrite/canary/ssl-redirect 全靠它。"
+      },
+      {
+        "name": "traefik",
+        "note": "CRD 流派",
+        "body": "用 IngressRoute CRD 表达路由,match 是表达式,配置类型化、可校验、动态生效。自带 Dashboard 与自动证书。"
+      },
+      {
+        "name": "Gateway API",
+        "note": "新一代入口标准",
+        "body": "Gateway + HTTPRoute 分层,路由语义标准化,解决 Ingress annotation 不可移植。nginx/traefik 都在实现。"
+      },
+      {
+        "name": "annotation",
+        "note": "controller 私有的配置",
+        "body": "ngress 之外的增强配置全是 annotation 字符串。拼错静默失败,是 Ingress 排错第一大坑。"
+      },
+      {
+        "name": "Service 类型",
+        "note": "ClusterIP / NodePort / LB",
+        "body": "Ingress 的前置演进:ClusterIP 集群内、NodePort 节点端口、LoadBalancer 云 LB。Ingress 站在它们之上做 7 层路由。"
+      }
+    ],
+    "nextSteps": "在 minikube 装 nginx-ingress,建一条 /api 路由并 curl 验证;加 rewrite-target 剥前缀看路径变化;再装 traefik 用 IngressRoute 写同一条路由,对比两派写法;最后看一眼 Gateway API 的 HTTPRoute 长什么样。",
+    "books": [
+      {
+        "id": "k8s-action",
+        "reason": "Service 与 Ingress 章节,把 ClusterIP/NodePort/LB/Ingress 的演进和字段一次讲清。"
+      }
+    ]
+  },
+  {
+    "id": "k8s-storage",
+    "keywordId": "k8s-storage",
+    "opening": "每个 Kubernetes 新手都问:容器重启数据还在吗?Pod 删了数据还在吗?默认答案都是不在——除非你用卷。而卷这一套设计,是集群里最像『云』的部分:PV 是机房里的磁盘,被登记成资产;PVC 是申请单,声明『我要 5G、可读写一块』;StorageClass 是自动贩卖机,你递出 PVC,它当场卷一块 PV 给你。三样加起来,存储就从『管理员手动挂盘』变成了『开发者自助申请』。",
+    "sections": [
+      {
+        "heading": "从 hostPath 到 PV:存储为什么必须抽象一层",
+        "body": "最早只有 emptyDir 和 hostPath:emptyDir 随 Pod 生灭(适合缓存),hostPath 直接挂宿主机目录(只在本机有意义,Pod 漂移就丢)。存储要跟 Pod 走,就得把『盘』和『机器』解耦。PV(PersistentVolume)就是这层抽象:它描述『集群里有一块 5G 盘,由 NFS/云盘/local 供给』,PV controller 把它登记成集群资产。Pod 不再直接说『挂 /mnt』,而是声明『给我一块盘』——具体哪块,由 PV 层决定。"
+      },
+      {
+        "heading": "PV 与 PVC 的绑定:一场严格的双向选择",
+        "body": "PVC(PersistentVolumeClaim)是需求侧:声明 size 和 accessMode(ReadWriteOnce 单节点读写 / ReadWriteMany 多节点 / ReadOnlyMany)。PV 是供给侧:标明自己能提供的容量和 accessMode。PVC 创建时,PV controller 在候选池里找一个『容量够、accessMode 匹配』的 PV 绑定,绑定后这个 PV 被占用。没有合适的 PV 就 Pending。accessMode 不匹配是绑定失败第一大原因——RWO 的盘,两个副本 Pod 想都挂,就是不绑。"
+      },
+      {
+        "heading": "StorageClass:把『手动配盘』变成『自动贩卖机』",
+        "body": "没有 StorageClass 的时代,管理员得预先建好 PV,开发者等盘。SC 把动态供给接进来:SC 定义一个 provisioner(通常是云厂商的 CSI 驱动)+ 参数(磁盘类型 io1/gp3、大小上限)。PVC 声明 storageClassName: standard,provisioner 收到请求,当场调云 API 建一块盘、生成 PV、完成绑定——全程无人值守。没写 storageClassName 的 PVC 用默认 SC(default storageclass);写 storageClassName: \"\" 表示显式拒绝动态供给,只等手动建好的 PV。"
+      },
+      {
+        "heading": "CSI:所有厂商挤进同一根管子",
+        "body": "早期每个云厂商的卷插件都写死在 kubelet 里(in-tree),加一个新厂商等于改内核。CSI(Container Storage Interface)2017 年引入:存储厂商只要实现 CSI 驱动(一个符合规范的 gRPC 服务),kubelet 和外部 provisioner 统一调用它。从此 AWS/Azure/GCE/NFS/本地盘全都走同一根管子,SC 的 provisioner 名就是 CSI driver 名。in-tree 插件在 1.26+ 基本全部搬走。"
+      }
+    ],
+    "angles": [
+      {
+        "name": "设计模式:资源-请求-绑定",
+        "content": "PV/PVC 是『供给资源-需求声明-自动绑定』三元组,和云上 EBS、甚至 CPU 请求是同一模式:需求方不感知具体资源,只管声明。"
+      },
+      {
+        "name": "概念拆解:PV(供)vs PVC(求)vs SC(自动化)",
+        "content": "PV 描述有什么盘,PVC 声明要什么盘,SC 定义怎么自动造盘。三层各管一段,排错先问自己是哪一层卡住了。"
+      },
+      {
+        "name": "风格架构:声明与控制解耦",
+        "content": "PVC 只声明需求,底层是 NFS/云盘/本地由 PV 和 SC 决定,应用代码不感知。这是控制面与数据面分离在存储上的体现。"
+      },
+      {
+        "name": "原理分析:为什么 accessMode 绑定严格",
+        "content": "RWO 的盘同一时刻只能被一个节点挂载,多副本 Pod 抢一块会数据损坏。所以绑定必须按 accessMode 过滤,宁可 Pending 也不乱绑。"
+      }
+    ],
+    "practices": [
+      "accessMode 别高估:RWO 只保证单节点,多副本读要 RWX 或每个副本独立 PVC。",
+      "Retain 策略的盘,删 PV 不会删底层:你得手动清,否则同一块底层盘再绑会数据错乱。",
+      "PVC 一直 Pending:八成是 storageClassName 没对上,或 SC 的 provisioner 驱动没装。kubectl describe pvc 看 Events。",
+      "accessMode 是绑定后不可变字段:想改只能重建 PVC,别硬试。",
+      "云厂商盘和节点区域绑定:Pod 被调度到别的 zone 会拿不到盘,靠 topology 感知的 SC 解决。"
+    ],
+    "example": "minikube 上建一个 PVC:accessModes: [ReadWriteOnce], resources.requests.storage: 5Gi, storageClassName: standard。Apply 后 kubectl get pvc 变 Bound,再看 kubectl get pv——minikube 的 hostpath provisioner 已经现场建了一块 5G 的 PV 并绑定。Pod 里 volumes 引用这个 PVC,挂载后 df -h 就是 5G。全程没手动建过任何盘,这就是 StorageClass 的动态供给。",
+    "subTopics": [
+      {
+        "name": "PV",
+        "note": "集群里的存储资产",
+        "body": "PersistentVolume,描述一块具体盘的容量、accessMode、供给方(NFS/云盘/local)与回收策略。由 PV controller 登记管理。"
+      },
+      {
+        "name": "PVC",
+        "note": "应用的申请单",
+        "body": "PersistentVolumeClaim,声明容量与 accessMode,创建时绑定一块匹配的 PV。Pending 说明没找到合适的盘。"
+      },
+      {
+        "name": "StorageClass",
+        "note": "动态供给的自动贩卖机",
+        "body": "定义 provisioner 与参数,PVC 声明 storageClassName 就自动建盘绑 PV。default SC 兜底没写名字的 PVC。"
+      },
+      {
+        "name": "AccessMode",
+        "note": "RWO / RWX / ROX",
+        "body": "ReadWriteOnce 单节点读写、ReadWriteMany 多节点、ReadOnlyMany 只读。绑定和挂载都受它约束。"
+      },
+      {
+        "name": "回收策略",
+        "note": "Retain / Delete / Recycle",
+        "body": "PVC 删除后 PV 怎么办:Retain 保留(手动清)、Delete 连底层盘一起删、Recycle 清空复用(已废弃)。"
+      },
+      {
+        "name": "CSI 驱动",
+        "note": "存储厂商统一插口",
+        "body": "Container Storage Interface,厂商实现 gRPC 服务接入 kubelet,SC 的 provisioner 名即 CSI driver 名。"
+      },
+      {
+        "name": "topology 感知",
+        "note": "卷和节点的区域绑定",
+        "body": "云盘创建在特定 zone,调度器要知道盘在哪才能把 Pod 调度过去,避免拿不到盘的 Pending。"
+      }
+    ],
+    "nextSteps": "minikube 上建一个默认 SC 的 PVC,观察 PV 自动出现并绑定;删掉 PVC 看回收策略怎么处理;再手动建一个 PV + 无 SC 的 PVC 绑定,体会 Retain 策略下清理底层盘的负担;最后读 CSI 驱动清单,认识一个云厂商的 driver。",
+    "books": [
+      {
+        "id": "k8s-action",
+        "reason": "存储章节,PV/PVC/StorageClass 的字段与动态供给流程,配 CSI 背景一次讲清。"
+      }
+    ]
   }
 ]

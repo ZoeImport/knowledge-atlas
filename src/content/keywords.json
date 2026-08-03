@@ -1,11 +1,196 @@
 [
-  { "id": "ebpf", "title": "eBPF", "category": "Linux 内核", "summary": "在内核里安全跑你写的字节码：不用改内核、不用重启，就能看到内核在干什么，甚至伸手拦一把。", "tags": ["内核", "追踪", "XDP", "kprobe"], "related": ["linux-netstack", "k8s-crd", "cpp-move-rust-ownership"], "books": ["csapp"] },
-  { "id": "iptables", "title": "iptables", "category": "网络", "summary": "让数据包按顺序过检查站的规则表：防火墙、NAT、端口转发全靠它，规则顺序写反就裸奔。", "tags": ["防火墙", "netfilter", "NAT"], "related": ["linux-netstack"], "books": ["csapp"] },
-  { "id": "linux-netstack", "title": "Linux 内核网络栈", "category": "Linux 内核", "summary": "一个包从网卡到进程的完整旅程：中断、NAPI、协议分层、socket 队列，每一站都有名字。", "tags": ["内核", "协议栈"], "related": ["ebpf", "iptables"], "books": ["csapp"] },
-  { "id": "clash-schedule", "title": "Clash / mihomo 调度原理", "category": "代理", "summary": "一个连接进门只问三句：归哪条规则、进哪个组、走哪个节点。答完，连接就发出去了。", "tags": ["clash", "mihomo", "代理"], "related": ["clash-rule", "fakeip", "proxy-deploy"], "books": [] },
-  { "id": "clash-rule", "title": "Clash Rule 规则体系", "category": "代理", "summary": "从上往下逐条问『这符合吗』，第一条命中即生效——分流逻辑全写在 YAML 里，顺序即一切。", "tags": ["clash", "规则"], "related": ["clash-schedule"], "books": [] },
-  { "id": "fakeip", "title": "FakeIP 与 DNS 泄露", "category": "代理", "summary": "先给个假 IP 把域名糊弄过去，真解析在代理内核内部完成——真 IP 不经过系统 DNS，也就泄露不了。", "tags": ["dns", "fake-ip", "隐私"], "related": ["clash-schedule"], "books": [] },
-  { "id": "proxy-deploy", "title": "服务器代理部署", "category": "代理", "summary": "装一个能跑代理协议的服务，配一个开机自启的守护，剩下的全是选址、限速和防被墙的讲究。", "tags": ["服务器", "代理"], "related": ["clash-schedule"], "books": [] },
-  { "id": "k8s-crd", "title": "Kubernetes CRD", "category": "Kubernetes", "summary": "教 Kubernetes 认识新名词的方式：CRD 是契约，controller 才是履约的人——只装 CRD，系统一动不动。", "tags": ["k8s", "CRD", "operator"], "related": ["ebpf"], "books": [] },
-  { "id": "cpp-move-rust-ownership", "title": "C++ 移动语义 vs Rust 所有权", "category": "语言", "summary": "C++ 的 std::move 靠你自觉不碰移后对象，Rust 的 move 是编译器直接不让——约定 vs 保证。", "tags": ["C++", "Rust", "所有权"], "related": ["ebpf"], "books": ["csapp"] }
+  {
+    "id": "ebpf",
+    "title": "eBPF",
+    "category": "Linux 内核",
+    "summary": "在内核里安全跑你写的字节码：不用改内核、不用重启，就能看到内核在干什么，甚至伸手拦一把。",
+    "tags": [
+      "内核",
+      "追踪",
+      "XDP",
+      "kprobe"
+    ],
+    "related": [
+      "linux-netstack",
+      "k8s-crd",
+      "cpp-move-rust-ownership"
+    ],
+    "books": [
+      "csapp"
+    ]
+  },
+  {
+    "id": "iptables",
+    "title": "iptables",
+    "category": "网络",
+    "summary": "让数据包按顺序过检查站的规则表：防火墙、NAT、端口转发全靠它，规则顺序写反就裸奔。",
+    "tags": [
+      "防火墙",
+      "netfilter",
+      "NAT"
+    ],
+    "related": [
+      "linux-netstack"
+    ],
+    "books": [
+      "csapp"
+    ]
+  },
+  {
+    "id": "linux-netstack",
+    "title": "Linux 内核网络栈",
+    "category": "Linux 内核",
+    "summary": "一个包从网卡到进程的完整旅程：中断、NAPI、协议分层、socket 队列，每一站都有名字。",
+    "tags": [
+      "内核",
+      "协议栈"
+    ],
+    "related": [
+      "ebpf",
+      "iptables"
+    ],
+    "books": [
+      "csapp"
+    ]
+  },
+  {
+    "id": "clash-schedule",
+    "title": "Clash / mihomo 调度原理",
+    "category": "代理",
+    "summary": "一个连接进门只问三句：归哪条规则、进哪个组、走哪个节点。答完，连接就发出去了。",
+    "tags": [
+      "clash",
+      "mihomo",
+      "代理"
+    ],
+    "related": [
+      "clash-rule",
+      "fakeip",
+      "proxy-deploy"
+    ],
+    "books": []
+  },
+  {
+    "id": "clash-rule",
+    "title": "Clash Rule 规则体系",
+    "category": "代理",
+    "summary": "从上往下逐条问『这符合吗』，第一条命中即生效——分流逻辑全写在 YAML 里，顺序即一切。",
+    "tags": [
+      "clash",
+      "规则"
+    ],
+    "related": [
+      "clash-schedule"
+    ],
+    "books": []
+  },
+  {
+    "id": "fakeip",
+    "title": "FakeIP 与 DNS 泄露",
+    "category": "代理",
+    "summary": "先给个假 IP 把域名糊弄过去，真解析在代理内核内部完成——真 IP 不经过系统 DNS，也就泄露不了。",
+    "tags": [
+      "dns",
+      "fake-ip",
+      "隐私"
+    ],
+    "related": [
+      "clash-schedule"
+    ],
+    "books": []
+  },
+  {
+    "id": "proxy-deploy",
+    "title": "服务器代理部署",
+    "category": "代理",
+    "summary": "装一个能跑代理协议的服务，配一个开机自启的守护，剩下的全是选址、限速和防被墙的讲究。",
+    "tags": [
+      "服务器",
+      "代理"
+    ],
+    "related": [
+      "clash-schedule"
+    ],
+    "books": []
+  },
+  {
+    "id": "k8s-crd",
+    "title": "Kubernetes CRD",
+    "category": "Kubernetes",
+    "summary": "教 Kubernetes 认识新名词的方式：CRD 是契约，controller 才是履约的人——只装 CRD，系统一动不动。",
+    "tags": [
+      "k8s",
+      "CRD",
+      "operator"
+    ],
+    "related": [
+      "ebpf",
+      "k8s-taint-affinity",
+      "k8s-ingress",
+      "k8s-storage"
+    ],
+    "books": []
+  },
+  {
+    "id": "cpp-move-rust-ownership",
+    "title": "C++ 移动语义 vs Rust 所有权",
+    "category": "语言",
+    "summary": "C++ 的 std::move 靠你自觉不碰移后对象，Rust 的 move 是编译器直接不让——约定 vs 保证。",
+    "tags": [
+      "C++",
+      "Rust",
+      "所有权"
+    ],
+    "related": [
+      "ebpf"
+    ],
+    "books": [
+      "csapp"
+    ]
+  },
+  {
+    "id": "k8s-taint-affinity",
+    "title": "污点、容忍度与亲和度",
+    "category": "Kubernetes",
+    "summary": "调度器凭什么把 Pod 放到这台节点:污点说『别来』,容忍说『偏要来』,亲和说『我就想去那儿』。",
+    "tags": [
+      "k8s",
+      "调度",
+      "亲和"
+    ],
+    "related": [
+      "k8s-crd"
+    ],
+    "books": []
+  },
+  {
+    "id": "k8s-ingress",
+    "title": "Ingress 与外部网关",
+    "category": "Kubernetes",
+    "summary": "Service 只管集群内,Ingress 才是外部门;nginx-ingress 靠 annotation 抢地盘,traefik 靠 CRD 自立门户。",
+    "tags": [
+      "k8s",
+      "ingress",
+      "网关"
+    ],
+    "related": [
+      "k8s-crd"
+    ],
+    "books": []
+  },
+  {
+    "id": "k8s-storage",
+    "title": "PV、PVC 与 StorageClass",
+    "category": "Kubernetes",
+    "summary": "存储是集群里最像云的部分:PV 是磁盘,PVC 是申请单,StorageClass 是自动贩卖机。",
+    "tags": [
+      "k8s",
+      "存储"
+    ],
+    "related": [
+      "k8s-crd",
+      "k8s-taint-affinity"
+    ],
+    "books": []
+  }
 ]
