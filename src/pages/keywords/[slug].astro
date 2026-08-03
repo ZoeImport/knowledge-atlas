@@ -38,6 +38,21 @@ const markTerms = (text, subs) => {
   }
   return out + text.slice(last)
 }
+// 渲染正文:``` 围栏代码块 → <pre><code>,其余文本段做术语标记
+const renderBody = (text, subs) => {
+  if (!text) return text
+  const segs = text.split(/```(\w*)[ \t]*\n?([\s\S]*?)```/g)
+  let out = ''
+  for (let i = 0; i < segs.length; i += 3) {
+    const inline = segs[i].replace(/`([^`\n]+)`/g, (m, c) => `<code class="inline-code">${escapeHtml(c)}</code>`)
+    out += markTerms(inline, subs)
+    if (segs[i + 2] !== undefined) {
+      const lang = segs[i + 1] || ''
+      out += `<pre class="codeblock"><code${lang ? ` data-lang="${escapeHtml(lang)}"` : ''}>${escapeHtml(segs[i + 2].replace(/\n$/, ''))}</code></pre>`
+    }
+  }
+  return out
+}
 ---
 <!doctype html>
 <html lang="zh-CN">
@@ -74,7 +89,7 @@ const markTerms = (text, subs) => {
             {(note.sections || []).map((s) => (
               <section class="note-block">
                 <h2>{s.heading}</h2>
-                <p set:html={markTerms(s.body, note.subTopics || [])} />
+                <div class="section-body" set:html={renderBody(s.body, note.subTopics || [])} />
               </section>
             ))}
 
@@ -102,7 +117,7 @@ const markTerms = (text, subs) => {
             {note.example && (
               <section class="note-block">
                 <h2>一眼看懂的例子</h2>
-                <p>{note.example}</p>
+                <div class="example" set:html={renderBody(note.example, note.subTopics || [])} />
               </section>
             )}
 
@@ -113,7 +128,7 @@ const markTerms = (text, subs) => {
                   {note.subTopics.map((s) => (
                     <details class="subtopic">
                       <summary><strong>{s.name}</strong> <span>{s.note}</span></summary>
-                      {s.body && <p>{s.body}</p>}
+                      {s.body && <p set:html={renderBody(s.body, [])} />}
                     </details>
                   ))}
                 </div>
