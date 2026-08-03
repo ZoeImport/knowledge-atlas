@@ -1,288 +1,826 @@
 [
   {
-    "id": "k8s-crd",
-    "keywordId": "k8s-crd",
-    "judgment": "Kubernetes 是「一切皆 API 对象」的系统，CRD 是你教它认识新名词的方式——但光有名词没有动词，系统一动不动。",
-    "background": "2018 年前后，Kubernetes 火起来，但官方资源只有 Pod、Service、Deployment 这些固定名词。你要声明「我要一个 PostgreSQL」「我要一张证书」，词表里没有。一开始大家把这些塞进 ConfigMap，再用脚本盯着——丢掉了声明式期望、校验、RBAC、事件、状态回写这些 Kubernetes 最值钱的东西。CRD 在 1.7 引入（2017），从此「自定义资源」成为一等公民，整个云原生生态所有 Custom 开头的东西都建在这上面。",
-    "principle": "CRD 本身只是一张词表条目——一份描述新资源长什么样的 OpenAPI schema。apply 之后，API server 才认识 `kubectl get websites`。但 CRD 不干活：它只负责接受、校验、存储。真正干活的是 controller——watch 到自定义资源被创建，读期望状态（spec），把现实拨过去，把观察写回 status。心智模型一句话：CRD 是契约，controller 是履约的人。",
-    "metaPrinciple": "要真懂 CRD，得往下一层看 API server 是怎么存它的：Kubernetes 的一切对象都存在 etcd（一个分布式的键值存储）里，API server 是唯一入口，负责 schema 校验、默认值填充、版本转换、鉴权。CRD 之所以「带类型、可 watch」，是因为 API server 把 CRD 的 schema 编译进了自己的校验逻辑，并用 informer/watch 机制向 controller 推送变更。所以 CRD 的强大不来自 schema 本身，而来自它接入了 API server 的整个管线。",
-    "angles": [
-      { "name": "设计模式：声明式 + 控制循环", "content": "CRD/controller 是「声明式期望 + 调和循环（reconcile）」的教科书实现：用户只写想要的状态，controller 负责把现实拨向期望。这个模式（level-triggered 而非 edge-triggered）是理解 K8s 一切资源的关键。" },
-      { "name": "概念拆解：契约 vs 履约", "content": "把「CRD」拆成两层：契约层（schema，声明名词长什么样）和履约层（controller，保证现实符合契约）。多数「装了 CRD 没反应」的困惑，都来自只装了契约、没派活人。" },
-      { "name": "风格架构：API server 为中心", "content": "CRD 之所以能扩展 K8s，是因为它接入了一个以 API server 为中心的事件驱动架构：所有状态变化都是 API 对象、都经 API server、都可被 watch。这让「扩展」变成「注册新 schema」，而不是改内核。" },
-      { "name": "原理分析：为什么 storage 版本不能改", "content": "schema 一旦成为 storage 版本，etc 里存的旧对象就是按旧 schema 序列化的。改 schema 需要 conversion（转换新旧版本），否则读不出来。这就是为什么 v1alpha1 声明「随时可能推翻」——它不承诺稳定。" }
-    ],
-    "practices": [
-      "版本演进最痛：schema 成为 storage 版本后是持久承诺，改结构要准备多版本共存和 conversion。",
-      "spec 和 status 必须分开：spec 是你想要的世界，status 是现实世界。把只读状态写进 spec 是新手签名。",
-      "finalizer 会让删除卡死：对象停在 Terminating，八成是有 finalizer 在等一个永远不来的回调。",
-      "schema 校验只是入口安检：没声明的字段默认被 prune 掉——多传一个字段没报错，不代表它被存下来了。"
-    ],
-    "example": "一个 `kind: CustomResourceDefinition`，group 为 example.com，schema 声明 spec.image 是 string。apply 后 `kubectl get web` 就有这个名词了。然后呢？没有任何 Pod 会跑起来——除非有个 controller 蹲在旁边 watch Website，把 image 变成一份 Deployment。这个例子的另一半，才是整个故事。",
-    "subTopics": [
-      { "name": "Operator 模式", "note": "CRD + controller + 常配 webhook 的统称，装 PostgreSQL/证书的「云原生插件」" },
-      { "name": "Controller / Reconcile", "note": "watch → 读 spec → 拨现实 → 写 status 的循环，声明式的引擎" },
-      { "name": "Finalizer", "note": "删除前的清理钩子；写不好会让对象永远 Terminating" },
-      { "name": "OwnerReference", "note": "父子关系 + 垃圾回收；子对象随父对象删除" },
-      { "name": "Schema 与 CEL 校验", "note": "CRD 自带的校验：结构校验 + CEL 表达式规则" },
-      { "name": "Webhook", "note": "Validating/Mutating：复杂规则和默认值注入的进阶手段" },
-      { "name": "Informer / Watch", "note": "API server 的变更推送机制，controller 的数据来源" },
-      { "name": "Conversion", "note": "多版本共存时新旧 schema 的转换器" }
-    ],
-    "nextSteps": "学完 CRD 该看 Operator 的完整实现（如 kubebuilder 生成的骨架），以及 Controller-Runtime 的 reconcile 与 event 循环，最后落到一个真实 Operator（如 cert-manager）读它的 CRD 定义。"
-  },
-  {
     "id": "ebpf",
     "keywordId": "ebpf",
-    "judgment": "eBPF 是「在内核里安全跑你写的字节码」——不用改内核、不用加载内核模块，就能观测和干预内核在做什么。",
-    "background": "想追踪内核、统计网络包、做高性能负载均衡，传统两条路都难：改内核源码要重编内核，加载内核模块要面对崩溃风险。eBPF 在 2014 年（Linux 3.18）由 Alexei Starovoitov 引入，把 1992 年为 tcpdump 写的经典 BPF 包过滤器，升级成内核内通用、安全、可编程的执行环境。它的出现让「观测内核」从「专家才能碰」变成「一行脚本」。",
-    "principle": "eBPF 程序通过 bpf() 系统调用加载，经过 verifier 静态验证（内存安全、有界循环、指针检查），通过后 JIT 编译成原生指令，挂在内核事件点上：tracepoint/kprobe（内核函数）、uprobe（用户态）、XDP（网卡驱动入口）。它不靠改内核，而是把程序「放进」内核的指定位置。心智模型：eBPF 是内核里的可插拔探针，verifier 是安检，JIT 是把它编译成原生性能。",
-    "metaPrinciple": "要懂 eBPF 为什么安全，得看 verifier 到底查什么：它逐条检查字节码，保证程序终止（循环有界）、内存访问不越界（指针只能从栈/map 派生）、不读未初始化数据。这不是运行时的沙箱，而是加载时的静态证明——所以 eBPF 程序「不可能」让内核崩溃或死锁（在 verifier 的模型内）。这是它敢放进内核运行的根本保证。",
+    "opening": "2020 年某天,Cloudflare 的网卡每秒要面对数千万个攻击包。他们没有改内核,只是把一段编译好的程序 attach 到驱动收包那一刻——丢包决定在 sk_buff 分配之前就做完,官方口径比 iptables 高效约 10 倍,CPU 开销不到 5%。这套东西叫 eBPF,前身是 1992 年 tcpdump 用来过滤报文的 2 寄存器、32 位指令集虚拟机。三十年后,它从抓包优化长成能写进内核数据路径、顺带把 kube-proxy 几万条 iptables 规则整个干掉的通用沙箱。",
+    "sections": [
+      {
+        "heading": "从 tcpdump 的过滤器到通用内核沙箱",
+        "body": "1992 年,Van Jacobson 和 Steven McCanne 在 USENIX 发表《The BSD Packet Filter》:tcpdump 在用户态过滤太慢,他们造了一台 2 寄存器、32 位指令集的虚拟机塞进内核,只把匹配的包拷上来。Linux 在 1997 年的 2.1.75 里抄了同一套设计,这就是 cBPF。2011 年高速网络让解释执行成了开销,3.2 内核首次给 BPF 加 x86 JIT(Eric Dumazet 提交)。真正翻篇是 2014 年:Alexei Starovoitov 3 月贴出 Extended BPF——64 位、11 个寄存器、固定 8 字节指令,天生为 JIT 设计;5 月 15 日 commit 622582786c9e 合入,合成基准最高提速 20 倍。12 月发布的 3.18 才是首个原生 eBPF 内核,别把年份记成 3.17。"
+      },
+      {
+        "heading": "verifier:内核里那台爱找茬的证明机",
+        "body": "把任意代码放进内核,第一道关卡是 verifier:它逐条指令做符号执行,证明你不越界、不死循环、不写坏内核内存——证不出来,load 直接失败。代价很具体:栈只有 512 字节(函数嵌套还会叠加,报错 'combined stack size of 7 calls is 688'),指令上限 100 万,5.3 之前连循环都不许写,只能 `#pragma unroll` 手工展开。2014 年 verifier 改成剪枝后,单个状态从 12464 字节瘦到 1712 字节,不然内存先爆炸。5.3 起它能逐路径证明循环终止;5.17 加 `bpf_loop`,大型循环不再逐条展开。注意 verifier 不是越新越松,5.4-5.10 的边界检查最狠,同一份程序老内核挂、新内核过很常见,排错先在 6.6+ 上跑。"
+      },
+      {
+        "heading": "XDP:在 sk_buff 之前动手",
+        "body": "内核收包的默认路径很贵:NAPI 轮询拿到包、分配 sk_buff、过 GRO 合并、再一层层走协议栈——哪怕最终要丢的包,这趟路也一步没省。XDP 在 2016 年的 4.8 里合入(Brenden Blanco 牵头,Google、Amazon、Intel 跟进),程序 attach 在驱动层,sk_buff 分配之前就拿到原始 rx_ring 缓冲,当场决定:XDP_DROP 丢、XDP_PASS 放行、XDP_TX 原路退回、XDP_REDIRECT 转给别的网卡。没有驱动支持只能退到 generic 模式(xdpgeneric),走 sk_buff 路径,性能差一个量级。账很好算:Meta 的 Katran 纯 XDP 扛单机 100-200Gbps、CPU 使用率不到 5%;Cloudflare 用 XDP 秒级丢弃数千万个包,官方口径比 iptables 高效约 10 倍,省下的 CPU 折成约 30% 的成本下降。"
+      },
+      {
+        "heading": "观测与把 iptables 请下台",
+        "body": "除了写进数据路径,eBPF 还接管了观测。一条 bpftrace 就能挂在 do_sys_open 上打印进程打开的路径:`kprobe:do_sys_open { printf(\"%s: %s\\n\", comm, str(arg1)) }`——arg1 是 pathname 指针,要用 str() 解引用;函数名跨版本会变,kprobe 不稳定,生产请用 tracepoint。替换 iptables 靠的是 BPF map:内核程序把 Service 三元组的查表结果放进哈希表,查一次 O(1),Cilium 用这套在 Kubernetes 里整个干掉 kube-proxy 的 iptables 规则链,Google GKE Dataplane V2 就是它。2018 年 BTF 进 4.18 后,CO-RE 让程序一次编译到处运行,不再每次内核升级重编——这正是它从创业公司工具变成基础设施标配的原因。"
+      }
+    ],
     "angles": [
-      { "name": "设计模式：钩子注入", "content": "eBPF 是「在不改目标代码的前提下，把探针挂到事件点」的钩子模式极致版：kprobe 是函数级钩子，XDP 是数据面钩子。理解钩子粒度（函数/事件/网卡入口）决定你能观测多深。" },
-      { "name": "概念拆解：verifier / JIT / map 三件套", "content": "verifier 保证安全、JIT 保证性能、bpf_map 保证内核与用户态的数据通道。拆开这三个，eBPF 的全部能力都从这三件套长出来。" },
-      { "name": "风格架构：数据面 vs 控制面", "content": "XDP 在数据面（每包处理、极快），bpf_map 是数据面与控制面的交接（控制面写规则，数据面读规则执行）。Cilium 的负载均衡就是这套架构。" },
-      { "name": "原理分析：为什么 verifier 拒绝复杂循环", "content": "verifier 要静态证明终止性，就得能对循环做有界分析。动态边界、复杂内存模型会超出它可证明的范围，于是直接拒绝——这是安全换表达力的取舍。" }
+      {
+        "name": "设计模式：把安全检查前置到加载时",
+        "content": "verifier 在程序执行前用符号执行证明其安全,运行时零额外负担;对比传统内核模块的『信任开发者』,这是把信任边界从人移到了机器证明。"
+      },
+      {
+        "name": "概念拆解：XDP 与 TC 一对兄弟",
+        "content": "XDP 挂在驱动收包的最早处,拿原始缓冲;TC 挂在协议栈入口和出口,能看到 sk_buff。同一个 eBPF 虚拟机,一个管『别收』,一个管『怎么走』。"
+      },
+      {
+        "name": "风格架构：探针散布加一张 map",
+        "content": "bpftrace 一行挂一个 kprobe 或 tracepoint,数据写进共享 map,用户态去读;整个观测栈就是『插桩点 + 环形缓冲 + 哈希表』三件套,零重启、零改业务代码。"
+      },
+      {
+        "name": "原理分析：map 查表为什么顶掉规则链",
+        "content": "iptables 每条包都要线性过一遍规则,Service 一多就是 O(n);eBPF 把结果预先算进哈希,单次查表 O(1),这正是 Katran 单机 200Gbps 的原因。"
+      }
     ],
     "practices": [
-      "verifier 不认复杂循环：有界循环可以，动态下标、越界访问会被拒——别跟 verifier 较劲，改数据结构。",
-      "bpf_map 是共享通道：设计 map 结构往往比写程序更难，它是内核与用户态的接口契约。",
-      "XDP 转发要自己处理回程：XDP 在协议栈之前，丢包容易，转发要小心（很多场景靠 TC 钩子补）。",
-      "不同内核版本行为差异大：事件名、helper 函数随内核变，写可移植程序要处理版本差异。"
+      "先确认 JIT:sysctl net.core.bpf_jit_enable=1,现代发行版默认已开,别手动折腾。",
+      "循环上界别拿 16 位字段当上界,先 if (len > 100) len = 100; 截断,否则打爆 1M 复杂度上限。",
+      "大缓冲别硬塞栈,用 per-CPU array map 当『更大的栈』,绕开 512 字节硬上限。",
+      "生产探针用 tracepoint 不用 kprobe——函数名随内核版本变,换内核脚本就全挂。",
+      "先在 6.6+ 内核上排错,老内核 verifier 更严,同一份程序可能 load 失败。"
     ],
-    "example": "`bpftrace -e 'kprobe:do_sys_openat2 { printf(\"%s %s\\n\", comm, str(args->filename)); }'`——每次打开文件打印进程名和路径，不改内核不加日志。这个例子的另一半是 XDP：在网卡入口直接丢包/转发，性能到内核数据面的极致——一个观测、一个干预。",
+    "example": "一条探针看文件读得怎么样:`sudo bpftrace -e 'kretprobe:vfs_read { @bytes = lhist(retval, 0, 2000, 200); }'`,Ctrl-C 后输出 `@bytes:` 直方图,`[0,200)` 区间 66 次、`[2000,...)` 39 次,大读和小读一屏就看出来;负值区间是 read 返回的错误码,看到 `-1` 先别慌,那是排查错误返回的直观信号。",
     "subTopics": [
-      { "name": "BPF verifier", "note": "静态验证程序安全性的「安检」，保证不会崩内核" },
-      { "name": "JIT 编译", "note": "字节码转原生机器码，运行时开销接近内核代码" },
-      { "name": "XDP", "note": "网卡驱动入口的极早执行点，高性能丢包/转发/负载均衡" },
-      { "name": "kprobe / tracepoint", "note": "内核函数/事件挂钩点，动态追踪的入口" },
-      { "name": "bpf_map", "note": "内核与用户态共享的键值存储，程序间通信通道" },
-      { "name": "libbpf / bpftrace", "note": "写正经工具的库，和一行出结果的脚本语言" },
-      { "name": "TC 钩子", "note": "网卡队列层的流量控制点，补 XDP 做不到的 egress" }
+      {
+        "name": "BPF map",
+        "note": "内核与用户态之间的共享键值通道",
+        "body": "用户态先建 map,内核程序按 key 读写的哈希或数组结构。Cilium 用它存 Service 端点,查表 O(1)。per-CPU 变体还能当『512 字节之外的大栈』用,解决栈空间不足的问题。"
+      },
+      {
+        "name": "verifier 状态剪枝",
+        "note": "让验证从 O(n) 状态机存活下来",
+        "body": "2014 年 verifier 从 O(n) 状态机改成剪枝后,单个状态从 12464 字节瘦到 1712 字节,否则内存先爆炸。剪枝靠『状态相同就不再探索』,这才让 100 万指令上限变得可行。"
+      },
+      {
+        "name": "BTF 与 CO-RE",
+        "note": "一次编译,到处运行",
+        "body": "BTF 在 4.18 提供稳定的类型元数据,libbpf 据此做 CO-RE:程序记录字段偏移,加载时按目标内核重定位。从此不用每次内核升级重编工具链,是 eBPF 能大规模铺开的前提。"
+      },
+      {
+        "name": "XDP 动作码",
+        "note": "收包瞬间的五种命运",
+        "body": "XDP_DROP 丢、XDP_PASS 放行进协议栈、XDP_TX 原网卡退回、XDP_REDIRECT 转给别的队列或网卡,加上 XDP_ABORTED。无驱动支持时退 xdpgeneric,走 sk_buff 路径,性能差一个量级。"
+      },
+      {
+        "name": "有界循环与 bpf_loop",
+        "note": "verifier 认可『能证明终止的循环』",
+        "body": "5.3 起 verifier 逐条路径证明循环可终止,循环体复杂度计入 1M 上限;大型循环仍会吃爆,5.17 的 bpf_loop 让循环体不再逐条验证,支持约 800 万次迭代。"
+      },
+      {
+        "name": "seccomp 与 tcpdump 的 eBPF",
+        "note": "最常见的 eBPF 用户,低调到看不见",
+        "body": "tcpdump 的 cBPF 过滤器在 2014 年 JIT 合并后由 eBPF 承载;seccomp-bpf 也是 eBPF 程序,只是可用指令很少。你每跑一次 tcpdump,verifier 都默默验一遍。"
+      }
     ],
-    "nextSteps": "下一步：用 bpftrace 随手追踪几个系统调用找手感，然后读 Cilium 的 XDP/BPF 源码理解数据面架构，最后动手写一个 libbpf 小工具（如统计某 syscall 频率）。"
-  },
-  {
-    "id": "cpp-move-rust-ownership",
-    "keywordId": "cpp-move-rust-ownership",
-    "judgment": "C++ 的移动是「你允许我把东西搬走」，Rust 的移动是「东西本来就只有一个主人」——前者靠约定，后者靠编译器。",
-    "background": "两门语言都面临同一个问题：避免深拷贝、安全地转移资源所有权。C++11（2011）引入右值引用和 std::move 解决「拷贝太贵」；Rust（2015 年 1.0）从设计之初就把所有权写进语言。三十年间 C++ 一路打补丁（RAII → move 语义 → unique_ptr），Rust 一开始就赌「所有权必须由编译器保证」。理解这个对比，等于同时看懂了「运行时约定」和「编译期保证」两种哲学。",
-    "principle": "C++ 的移动是优化：右值引用 && + std::move 把左值标记成「可被转移」，移动构造/赋值偷走资源避免拷贝；但对象移后仍存在，处于「合法但未定义」状态，靠 RAII 保证析构安全，程序员负责不再碰它。Rust 的所有权是规则：每个值有唯一 owner，赋值/传参默认就是 move（除非实现 Copy），移动后原绑定在编译期即失效，借用检查器保证无悬垂、无双释放。一句话：C++ 是「快递可以转手，但要你确认」，Rust 是「快递只有一个收件人，系统帮你盯着」。",
-    "metaPrinciple": "Rust 的借用检查器凭什么在编译期就能保证内存安全？因为它用「所有权 + 生命周期」把值的生死关系建模成了可证明的约束：一个值只能有一个 owner（赋值即转移），借用必须不越过 owner 的生命周期（借用检查器验证借用区域的存活范围）。这不是运行时 GC 也不是运行时计数，而是把「指针何时有效」变成编译期可解的问题。C++ 的选择是：信任程序员 + RAII 兜底，代价是悬垂引用和 use-after-move 是 UB（编译器不管）。",
-    "angles": [
-      { "name": "设计模式：所有权转移", "content": "两语言都有「把资源转移给新的持有者」这个模式：C++ 是 unique_ptr 的移动，Rust 是 move 语义。区别在于 C++ 转移后旧对象是「空壳」（你约定不用），Rust 转移后旧绑定直接不存在（编译器强制）。" },
-      { "name": "概念拆解：move vs copy", "content": "move 是转移（资源跟着走，原处腾空），copy 是复制（两处都有）。C++ 默认拷贝、move 靠写移动构造；Rust 默认 move、Copy 类型才拷贝。这是两门语言对「值」最基本的默认。" },
-      { "name": "风格架构：RAII vs 编译器保证", "content": "C++ 的安全模型是 RAII（资源随对象生命周期）——运行时 + 约定；Rust 的安全模型是所有权——编译期 + 证明。前者灵活但要纪律，后者严格但免悬垂。" },
-      { "name": "原理分析：为什么 use-after-move 是两难", "content": "C++ 选择「移后对象仍可析构」就得允许它存在（空壳态），而「存在但未定义」必然产生 use-after-move 的 UB 区。Rust 干脆禁止移后使用，代价是某些表达要绕道（如 Option::take）。" }
-    ],
-    "practices": [
-      "C++ 移后对象是「僵尸」：访问它通常不报错但行为未定义——最难 debug 的坑，别依赖移后状态。",
-      "std::move 不移动任何东西：它只是把左值转成右值引用，真正的移动发生在移动构造/赋值里。",
-      "Rust 里别跟 borrow checker 对抗：它禁止的是真 bug（数据竞争、悬垂），调数据结构通常比绕开更干净。",
-      "C++ 返回值优化（RVO）让很多 move 实际不发生：别为「避免拷贝」写一堆 std::move 反而阻碍优化。"
-    ],
-    "example": "C++：`std::vector<int> a = {1,2,3}; auto b = std::move(a);`——a 变成空壳，编译通过，但你再用 a 就是 UB。Rust：`let a = vec![1,2,3]; let b = a;`——之后再碰 a 直接编译错误。同样搬走一个容器，C++ 靠你自觉，Rust 靠编译器在你还想碰它的那一行当场报错。这就是「约定 vs 保证」的全部差异。",
-    "subTopics": [
-      { "name": "右值引用与 std::move", "note": "C++ 标记「可转移」的语法机制；move 本身不移动" },
-      { "name": "移动构造/赋值", "note": "真正偷走资源的函数；写不好会退回拷贝或悬垂" },
-      { "name": "RAII", "note": "C++ 的资源管理范式：构造函数取资源、析构函数释放" },
-      { "name": "所有权", "note": "Rust 的核心：每个值唯一 owner，转移即 move" },
-      { "name": "借用与生命周期", "note": "Rust 的引用规则：不越过 owner 生命周期的借用才合法" },
-      { "name": "Box 与 unique_ptr", "note": "堆上的唯一所有权：Rust 的 Box 对 C++ 的 unique_ptr" },
-      { "name": "编译期保证 vs 运行时约定", "note": "Rust 靠编译器证明，C++ 靠 RAII + 纪律" }
-    ],
-    "nextSteps": "学完这个对比：在 Rust 里手写一个自引用结构（撞上生命周期），再回 C++ 用 unique_ptr 实现同样的所有权转移，体会两边的报错/沉默分别意味着什么。"
+    "nextSteps": "装 bpftrace 跑一条 sys_enter_execve 探针看进程启动;用 bpftool prog show 读已加载程序的 jited/xlated 字段;写一个 10 行 XDP_DROP 程序,ip link set dev eth0 xdp obj x.o sec xdp 挂载再卸载;对照报错读 verifier 验证流程,把循环上界截断这类坑记进笔记。",
+    "books": [
+      {
+        "id": "bpf-tools",
+        "reason": "Gregg《BPF Performance Tools》第 1-3 章讲演进与上手、第 8 章网络排查,和文中 bpftrace 片段同源。"
+      },
+      {
+        "id": "linux-net",
+        "reason": "Benvenuti《Understanding Linux Network Internals》读 NAPI 与 sk_buff 接收路径,才能讲清 XDP 到底绕过了什么。"
+      }
+    ]
   },
   {
     "id": "iptables",
     "keywordId": "iptables",
-    "judgment": "iptables 是一张让数据包按顺序过检查站的规则表：防火墙、NAT、端口转发全靠它，规则顺序写反，该放行的被拦、该拦的放行。",
-    "background": "netfilter 是内核 2.4（2001 年）引入的包过滤框架，在协议栈的固定位置挂了五个钩子；iptables 是它的用户态命令行，前身是 2.2 时代的 ipchains。此后二十年，Linux 上的防火墙、NAT、端口转发基本都靠它，直到 nftables（2014 年、内核 3.13）出现——而现在你敲的 iptables 命令，在很多发行版上只是 nftables 的兼容翻译。云原生时代它又当了一回主角：kube-proxy 的 iptables 模式靠它实现 Service 的转发。",
-    "principle": "数据包沿协议栈走，会经过五个钩子：PREROUTING（进来还没决定给谁）、INPUT（发给本机）、FORWARD（本机转发）、OUTPUT（本机发出）、POSTROUTING（出去之前）。iptables 用「表」组织规则，每张表管一类事：filter 过滤、nat 改地址、mangle 改字段、raw 跳过连接跟踪。包到一个钩子点时，按固定顺序过相关表里的链，逐条匹配，命中即执行目标——ACCEPT 放行、DROP 丢弃、SNAT/DNAT 改地址、LOG 记录。心智模型一句话：钩子是检查站，表是检查站里的不同柜台，链是柜台前排的规则队伍。",
-    "metaPrinciple": "iptables 之所以能在每个包上执行任意规则，是因为 netfilter 在协议栈里埋了回调点：五个钩子枚举值（NF_IP_PRE_ROUTING 等），注册上去的函数在每个包经过时被调用，返回 NF_ACCEPT / NF_DROP / NF_STOLEN 之类的裁决。真正的执行者是这些钩子函数，规则表只是它们读取的数据。另一个隐藏机制是 conntrack（连接跟踪）：它给每条流维护一张状态表，NAT 之所以能「改了去的包、回来再改回去」，stateful 防火墙之所以能认出 ESTABLISHED 回程包，全凭这张表。",
+    "opening": "2023 年一次线上事故让我记到今天:一台公网服务器的 22 端口被爆破,同事补了一串 iptables 规则后,`iptables -L -n` 里明明白白有 DROP,扫描器却照样连进来。排查半小时才发现,那条 DROP 是用 `-A` 追加到链尾的,前面一条 `ACCEPT all` 已把它短路。iptables 是 first-match-wins,顺序即生死——坑全藏在'顺序''表''钩子''conntrack'几个词里。",
+    "sections": [
+      {
+        "heading": "从 ipfwadm 到 netfilter:Rusty Russell 的两次重写",
+        "body": "Linux 2.0 时代(1995-1996)防火墙叫 ipfwadm,Jos Vos 维护,源头是 BSD 的 ipfw:直接改内核代码,把过滤逻辑焊死在网络路径上。1998 年 Rusty Russell 为 2.2 写 ipchains,加了链式规则,仍是'改内核代码'模式,过滤/NAT 耦合。同年他启动 netfilter:教训是直接塞过滤逻辑不可维护。解法是在网络代码里留一排通用钩子(netfilter hooks),让过滤/NAT/跟踪各以模块挂上。2001 年 2.4 交付,拆出 filter/nat/mangle 三表与五条内置链;conntrack 让状态化防火墙成为可能;2.4 之前只有 MASQUERADE 一个特例。"
+      },
+      {
+        "heading": "顺序即生死:一条 DROP 为什么拦不住任何包",
+        "body": "iptables 是 first-match-wins:包从链头走到链尾,第一条匹配就执行,后面规则看都不看。`-A` 追加到链尾,`-I` 插到链头。典型翻车:开头 `ACCEPT all`,后面 `-A` 加禁 25 端口的 DROP——永远轮不到,计数恒为 0。所以状态化规则放最前:先放 `-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT`,已建立连接尽早放行,只剩 NEW 包。INVALID 要显式写 DROP;conntrack 只标记不丢。排查第一动作是 `iptables -L -n -v --line-numbers`,带行号看顺序,对着计数器判断谁在生效。"
+      },
+      {
+        "heading": "conntrack:内核替你记住的那张连接表",
+        "body": "状态化防火墙的秘密全在 conntrack 表:prerouting 首次查表记为 NEW,握手后 input/postrouting 做 confirm 标成 ESTABLISHED;RELATED 覆盖 FTP 这类衍生流。被丢弃的包不留条目——'规则拦了但表里没有'的注脚。四态 NEW/ESTABLISHED/RELATED/INVALID,INVALID 只标记不丢。表有硬上限,默认 `nf_conntrack_max=65536`,每条约 300 字节;打满时新连接被静默丢弃,表现为间歇性超时。看 `nf_conntrack_count/max`,超 75% 预警;根因常是 TIME_WAIT/UDP 泄漏,调上限只是治标。"
+      },
+      {
+        "heading": "NAT 三兄弟:SNAT、DNAT、MASQUERADE 别用混",
+        "body": "NAT 在 nat 表的 PREROUTING 与 POSTROUTING 两条链工作。DNAT 在 PREROUTING 改写目的地址,经典用法是公网 80 转内网 10.0.0.5:8080;SNAT 与 MASQUERADE 都在 POSTROUTING 改写源地址,差别在 MASQUERADE 面向动态 IP,每次转发重查现算出口,SNAT 写死源地址、少查一次。固定 IP 用 SNAT,拨号出网用 MASQUERADE。两个典型事故:SNAT 写死成旧公网 IP,运营商换 IP 忘同步,出网全断;只写 DNAT 漏了 POSTROUTING 回程,应答包找不到回家的路,表现'能连上但请求挂起'。"
+      },
+      {
+        "heading": "规模天花板:kube-proxy 是怎么被规则链拖垮的",
+        "body": "kube-proxy 把每个 Service 的每条 endpoint 展开成规则,线性匹配。Service 数×endpoint 数,规则 O(services×endpoints) 涨,上千 Service 数万条,每包经过整条扫。更致命是更新:`iptables-restore` 原子替换独占 xtables 锁,期间单条命令排队阻塞,CNI 更新被卡到秒级;超 1000 Service 即见延迟。K8s 切 IPVS 用 hash 查找,但 `AddEntry()` 约 2000 Service 时拖到 14s/17s。最终轮到 nftables 和 eBPF:原子事务与 O(1) BPF map 换掉规则集规模。"
+      }
+    ],
     "angles": [
-      { "name": "设计模式：钩子 + 责任链", "content": "不能改内核，就留固定位置让用户逻辑插入；每个包在检查站顺序经过多张表，本质是责任链：先过谁、先匹配谁，完全由顺序决定。" },
-      { "name": "概念拆解：表 / 链 / 规则 / target", "content": "表决定管什么（filter/nat/mangle/raw），链决定在哪个检查站查，规则是「如果满足什么条件」，target 是「就做什么」。四层拆开，一条命令就好读了。" },
-      { "name": "风格架构：数据面与控制面", "content": "iptables 命令写入的规则是控制面数据，真正的匹配转发发生在数据面；规则改起来不用碰内核，这是可配置数据面的经典形态。" },
-      { "name": "原理分析：为什么规则顺序敏感", "content": "规则顺序匹配、先命中先生效，所以「先放行后拒绝」是灾难、宽松规则放前面会截胡；追查问题必须从头逐条读规则。" }
+      {
+        "name": "设计模式:钩子订阅 + 责任链",
+        "content": "netfilter 是'内核代码里预留钩子、各模块按需订阅'的框架,iptables/nftables 只是写规则的订阅者;规则链是责任链,first-match-wins 命中即短路,顺序即优先级。"
+      },
+      {
+        "name": "概念拆解:表与链是职责分区,不是数据结构",
+        "content": "filter 管放行丢弃,nat 管地址改写,mangle 管 TTL/MSS/TOS 改动,raw 关 conntrack——同一批钩子上不同表挂不同职责,想改 TTL 就必须进 mangle。"
+      },
+      {
+        "name": "风格架构:用户态工具 ≠ 内核框架",
+        "content": "iptables 只是用户态命令,内核里是 netfilter 钩子+模块;ip6tables/arptables/ebtables 分属 L2/L3,用一套工具管 IPv6/ARP 是错的。"
+      },
+      {
+        "name": "原理分析:为什么 NAT 先于 filter 求值",
+        "content": "入站 DNAT 在 prerouting 改写地址之后才做路由,所以 filter/INPUT 看到的是转换后的地址,按原始目的地址写匹配必然落空。先背下求值顺序,再排'规则没生效'类事故。"
+      }
     ],
     "practices": [
-      "规则顺序即优先级：精确规则放前面、宽泛规则放后面，MATCH 兜底永远在最后。",
-      "-F 会清空整条链：生产环境误清空等于裸奔，动规则前先 iptables-save 备份。",
-      "SNAT/DNAT 靠 conntrack 记回程：改了去向的包，回来时靠连接跟踪表再改回来，别以为自己少写了一条。",
-      "stateful 判断要用 -m state 或 -m conntrack：不写 ESTABLISHED,RELATED 放行回程，回包会全丢。",
-      "Docker / k8s 都重度使用 iptables：你手动加的规则可能被 Docker 的重启清掉，注意恢复顺序。"
+      "规则集开头三条:ESTABLISHED,RELATED 放行、INVALID DROP,放业务规则。",
+      "排查先看 iptables -L -n -v --line-numbers 的行号与计数。",
+      "端口转发别漏 POSTROUTING 回程,否则连接挂起。",
+      "固定 IP 用 SNAT,动态出网用 MASQUERADE,都在 POSTROUTING。",
+      "conntrack 超 75% 先查 TIME_WAIT/UDP 泄漏,别只调大上限。"
     ],
-    "example": "`iptables -t nat -A PREROUTING -p tcp --dport 80 -j DNAT --to-destination 10.0.0.5:8080`——访问本机 80 的包，被改目的地址转到内网 10.0.0.5:8080。这只是改了去向；回程怎么回来？靠 conntrack 记住这次改动，把响应包的目的地址再改回去。一条 DNAT 规则加一张连接跟踪表，就是整个端口转发的全部。",
+    "example": "报警:服务偶发连不上。先数 TIME_WAIT:`ss -tan state time-wait | wc -l` 返回 8300+,端口范围 `ip_local_port_range` 只有约 28k,除以 60s 约等于 470 个并发上限——客户端短连接把端口耗尽了。调低 TIME_WAIT 回收,问题消失。",
     "subTopics": [
-      { "name": "netfilter 钩子", "note": "协议栈上的五个挂载点，iptables 的底层载体" },
-      { "name": "conntrack", "note": "连接跟踪表，NAT 回程与 stateful 防火墙的地基" },
-      { "name": "SNAT / DNAT / MASQUERADE", "note": "改源地址 / 改目的地址 / 伪装出口 IP" },
-      { "name": "nftables", "note": "iptables 的后继者，语法更统一" },
-      { "name": "kube-proxy iptables 模式", "note": "K8s Service 转发背后的规则生成" },
-      { "name": "raw 表", "note": "跳过 conntrack 跟踪，高流量时的逃生口" },
-      { "name": "ip6tables", "note": "IPv6 版本的同一套规则体系" }
+      {
+        "name": "ipfwadm 与 ipchains 的遗产",
+        "note": "两条注定被替换的老路",
+        "body": "2.0 时代防火墙是 ipfwadm,源自 BSD ipfw,靠改内核代码做过滤与 NAT;1998 年 Rusty 为 2.2 写 ipchains,仍是改内核模式,过滤/NAT 耦合。netfilter 同年启动,用统一钩子框架重来。"
+      },
+      {
+        "name": "DNAT 与 INPUT 的地址错觉",
+        "note": "NAT 先于 filter 求值的后果",
+        "body": "入站 DNAT 在 nat/PREROUTING 改写目的地址后才做路由,filter/INPUT 链看到的已是转换后的地址。按原始目的地址写 INPUT 匹配永远匹配不上——这是'端口转发规则看起来没生效'的头号根源,比规则顺序还隐蔽。"
+      },
+      {
+        "name": "conntrack 状态机",
+        "note": "INVALID 只标记不丢弃",
+        "body": "conntrack 在 prerouting 查表、input/postrouting confirm,被丢弃的包不留条目。INVALID 不会自动丢,须显式 DROP;RELATED 覆盖 FTP 等关联会话,状态化因此少写一半规则。"
+      },
+      {
+        "name": "SNAT vs MASQUERADE",
+        "note": "动态 IP 选哪个一目了然",
+        "body": "两者都只在 POSTROUTING 工作,但 MASQUERADE 每次转发重查 conntrack 现算出口 IP,适合动态公网;固定 IP 用 SNAT 写死源地址、少一次查表。把 SNAT 写死成旧 IP,换了公网地址直接翻车。"
+      },
+      {
+        "name": "xtables 锁与原子替换",
+        "note": "高并发更新被卡死的元凶",
+        "body": "iptables-restore 原子替换独占内核 xtables 锁,期间单条 iptables 命令排队阻塞。kube-proxy 每轮规则同步加 CNI 并发更新,锁争用把同步拖到秒级——K8s iptables 模式事故的主要来源。"
+      },
+      {
+        "name": "nftables 的原子事务",
+        "note": "语法是表象,事务才是真改进",
+        "body": "nftables 在内核里是一个小型通用虚拟机,规则集以字节码提交,更新走原子事务:要么整条规则集一起生效,要么全部失败,没有 iptables 逐条更新的中间态。这才是它替代 iptables 的硬理由,而不只是更简洁的 nft 语法。"
+      }
     ],
-    "nextSteps": "先 iptables -L -n -v 看本机真实规则，用 iptables-save 导出一份从头读一遍；然后动手做一次 DNAT 端口转发 + MASQUERADE 出网，体会 NAT 回程；最后看 nftables 语法，或读 kube-proxy 生成的规则理解 Service 转发。"
+    "nextSteps": "测试机先 iptables-save > backup.rules,再 iptables -F 清空,重建 ssh+conntrack 三连最小规则集;再用 nft 重写,试 nft -f 原子提交与 restore 锁差异。",
+    "books": [
+      {
+        "id": "linux-net",
+        "reason": "第 30/31 章是 netfilter 表/链与 conntrack、NAT 最完整的内核实现描述,钩子求值顺序与 INVALID 不自动丢都以此为准。"
+      },
+      {
+        "id": "k8s-action",
+        "reason": "Service 与 kube-proxy 章节把 iptables 模式如何串规则链、以及它的规模天花板讲透,对应本文的规则集爆炸叙事。"
+      }
+    ]
   },
   {
     "id": "linux-netstack",
     "keywordId": "linux-netstack",
-    "judgment": "Linux 收一个包不是一步到 socket：网卡 DMA → 中断 → NAPI 轮询 → 协议分层处理 → socket 队列。每一站都可能改包、丢包、放行，这就是网络栈。",
-    "background": "从网线上的以太网帧到进程里的字节流，中间隔着很多层，每层有自己的协议和头。Linux 网络栈在 2.2~2.6 时代定型，其中 NAPI（2002 年起）解决了一个关键问题：高流量下的中断风暴——每次收包都打断 CPU 会让吞吐越高 CPU 越忙，NAPI 改成「中断唤醒一次，然后轮询批量收」。理解网络栈，就是理解一个包从物理网卡到用户态进程的完整旅程，以及中途每一层为什么要插手。",
-    "principle": "收包路径：网卡把数据 DMA 进内存 → 中断通知 CPU → NAPI 轮询批量取包 → 包被装进 sk_buff → 链路层看 eth_type 判断 IPv4/IPv6 → IP 层查路由、看 TTL、必要时分片重组，还要过 netfilter 钩子 → 传输层按四元组（源/目的 IP 与端口）找到对应 socket → 数据进 socket 接收队列 → 用户态 recv() 取走。发包路径反向来一遍。sk_buff 是这趟旅程的载体：每个包是一个 sk_buff，层间传递时各层往头上加或剥自己的协议头。",
-    "metaPrinciple": "为什么要分成一层层、每层还都要「加头」？因为分层让每层协议可以独立演进：上层不必关心底下是光纤还是 WiFi。但分层有代价——每层拷贝、查表都吃 CPU，于是有了 GRO/GSO（合并小包）、RSS 多队列（多核分摊）、零拷贝、甚至 DPDK 直接绕过内核。理解「为什么分层」就理解了「为什么有一堆加速技术」：它们全都在跟分层带来的开销作斗争。另外，netfilter 钩子插在协议栈的关键位置，这是 iptables 和 eBPF 能干预一切流量的物理基础。",
+    "opening": "深夜两点,线上 Nginx 偶发 Connection refused,CPU 却纹丝不动。防火墙、后端、磁盘查遍,最后 `ss -lnt` 一看,443 的 Send-Q 写着 128——应用 backlog 写了 65535,却被 `net.core.somaxconn` 悄悄掐掉。协议栈的『静默截断』天天有。从网卡到 socket,这一路是 NAPI 的中断活锁、CUBIC 的锯齿、TIME_WAIT 的 60 秒,处处讨价还价。",
+    "sections": [
+      {
+        "heading": "一次 2.4.20 的生死抉择:关掉中断去轮询",
+        "body": "2001 年 Gbit 网卡刚普及时,满速收包等于灾难:每来一个包就触发一次硬中断,CPU 被中断风暴打到 100%,吞吐却跌破 100Mbps——这就是中断活锁。内核 2.4.20(2002 年)合入 NAPI,由 Jamal Hadi Salim 等人实现:关掉中断,把网卡挂进软中断的 poll_list,由 `net_rx_action` 每轮按配额取包。今天驱动丢包先看这条路径:`rx_no_buffer_count` 增长,十有八九是 NAPI 轮询配额或 ring buffer 不够。反面教材同样真实:早期 tg3 在轻载下频繁开关中断反而多耗约 8% CPU,直到驱动学会编程硬件中断合并门限。"
+      },
+      {
+        "heading": "CUBIC 统治了十五年,BBR 凭什么截胡",
+        "body": "2005 年 CUBIC 进内核,作者来自 NC State 的 Rhee 团队。它把拥塞窗口恢复画成一条三次曲线:凹段快速逼近上次丢包点,凸段放缓试探,2.6.19 起成为默认,一坐十五年。它的毛病也写在曲线上——靠丢包当反馈信号,高 BDP 的跨洋链路永远估不满带宽,对 bufferbloat 无感。2016 年 4.9 合入的 BBR 换了个思路:不问『丢了多少』,用瓶颈带宽 × 最小 RTT 直接建模链路容量(四态机见下文)。Google 两年内把搜索、YouTube、GCP 全部切到 BBR;到今天 `sysctl net.ipv4.tcp_congestion_control` 默认仍是 cubic。"
+      },
+      {
+        "heading": "listen(65535) 为什么只收 128:背压队列的静默规则",
+        "body": "`listen(fd, 65535)` 能拿到 65535 的队列吗?不能。accept 队列长度取 `min(应用 backlog, net.core.somaxconn)`,somaxconn 默认 128,65535 被静默截断成 128。`ss -lnt` 的 Send-Q 显示真实长度:Nginx 常见 511。Recv-Q 贴着 Send-Q 时说明 accept 队列饱和,内核丢新 SYN,表现是『偶发 Connection refused』。排查第一站:先看 Send-Q 是否被 somaxconn 掐了。只改内核不改进程(Nginx `listen 443 backlog=65535;`),问题原样还在。"
+      },
+      {
+        "heading": "TIME_WAIT 不是病,病的是想治它的教程",
+        "body": "TIME_WAIT 常被当成内存泄漏,其实它是 PAWS 的守门员:连接关闭后要等 2*MSL(默认 60 秒),防止迟到的旧段串扰新连接,大量短连接挂着上万条是常态。真正翻车的是老教程爱教的 `tcp_tw_recycle=1`——它丢『时间戳比已回收连接更早』的入向包,NAT 后面的客户端时间戳一乱序就间歇性连不上,该参数新内核已移除。`tcp_tw_reuse` 常被误读:只对出站连接有效,服务端无效,还得 `tcp_timestamps=1`。调参先定量:`ss -tan state time-wait | wc -l`,再用 `ip_local_port_range`(28k 端口)除以 60 秒得 470,算并发上限。"
+      }
+    ],
     "angles": [
-      { "name": "设计模式：分层协议栈", "content": "每层只认识自己的头和对下一层的接口，这是 TCP/IP 能活五十年还能接住新协议（QUIC、HTTP/3）的架构原因。" },
-      { "name": "概念拆解：sk_buff", "content": "整个栈流转的载体，理解一个包就是跟踪它在 sk_buff 上的状态变化；抓包和调优几乎都在跟它打交道。" },
-      { "name": "风格架构：中断 vs 轮询", "content": "NAPI 用「中断唤醒 + 轮询批量收」避免高流量下的中断风暴，是软中断处理的高性能范式，很多驱动都照这个思路。" },
-      { "name": "原理分析：为什么吞吐高时 CPU 先顶不住", "content": "协议栈是纯软件，每层处理都有代价；当吞吐超过单核能力，就得上 RSS 多队列、GRO 或干脆 DPDK 绕过内核。" }
+      {
+        "name": "设计模式：中断换轮询",
+        "content": "NAPI 把『每包一次硬中断』换成软中断轮询,是典型的拉模式替换推模式。代价也真实:轻载下频繁开关中断反而多耗约 8% CPU(tg3 早期回归),所以现代驱动加中断合并门限做负载感知。"
+      },
+      {
+        "name": "概念拆解：拥塞窗口 vs BDP",
+        "content": "一条 TCP 连接跑多快,由 min(瓶颈带宽, 窗口/RTT) 决定。CUBIC 按丢包恢复窗口,BBR 估 BtlBw×minRTT,分歧从 `ss -i` 的 cwnd 与 rtt 看起。"
+      },
+      {
+        "name": "风格架构：可插拔的协议栈",
+        "content": "拥塞控制是模块(tcp_cubic.ko/tcp_bbr.ko),路由表按命名空间隔离,netfilter 是钩子框架。各部件可替换,BBR 才得以两年内换掉默认算法而不动协议主体。"
+      },
+      {
+        "name": "原理分析：静默的背压",
+        "content": "协议栈传递压力靠『悄悄丢』:accept 队列满丢 SYN、conntrack 满丢新连接、backlog 超限直接取小。它不报错,只体现在计数器和偶发超时里——排障要先看计数器,别先怀疑路由。"
+      }
     ],
     "practices": [
-      "tcpdump 抓在链路层入口：它在协议栈的最前面，所以能看到进来后还没被 IP 层丢弃、没进 socket 队列的包——这是它和「进程看到的包」有出入的原因。",
-      "看栈健康用 /proc/net/snmp 和 netstat -s：丢包、重传、重组失败的统计都在里面，别只盯业务日志。",
-      "改 MTU、RSS 队列数对吞吐有实质影响：大包、多队列能明显提升，尤其在高并发场景。",
-      "localhost 也走完整协议栈：lo 接口一样过 netfilter 钩子，别以为本机访问没有防火墙这层。",
-      "用 ip 命令代替 ifconfig：现代栈的参数和可观测性都在 iproute2 里。"
+      "排偶发 Connection refused,先 `ss -lnt` 看 Send-Q 是否被 somaxconn 截断,再查应用 backlog。",
+      "换 BBR 先 `sysctl net.ipv4.tcp_available_congestion_control` 确认有 bbr,再 `sysctl -w` 切换。",
+      "收包丢包先 `ethtool -S eth0 | grep rx_no_buffer_count`,增长就 `ethtool -G eth0 rx 4096` 扩 ring buffer。",
+      "动 TIME_WAIT 前先 `ss -tan state time-wait | wc -l` 定量,用端口范围除以 60s 估并发上限。",
+      "调 sysctl 写进 /etc/sysctl.d/99-tuning.conf(字典序靠后能压住别人),改完 `sysctl --system` 生效。"
     ],
-    "example": "curl 访问 example.com 的收包旅程：网卡 DMA → NAPI poll 取包 → sk_buff 传给 IP 层，查路由判定发给本机 → TCP 层按四元组找到那个 ESTABLISHED 的 socket → 数据塞进接收队列 → curl 的 read() 拿到字节。每一站都有名字，调试网络问题就是顺着这条链找断点在哪。",
+    "example": "`ss -lnt` 上 Nginx 443 的 Send-Q 写着 511,而你 `listen(fd, 65535)` 的服务只有 128——内核取 `min(backlog, somaxconn)`:前者是发行版把 somaxconn 调到了 511,后者被默认的 128 静默截断,不报错。",
     "subTopics": [
-      { "name": "sk_buff", "note": "包在协议栈里流转的载体，一层一个头" },
-      { "name": "NAPI / GRO", "note": "中断唤醒 + 轮询批量收，以及小包合并" },
-      { "name": "netfilter 钩子", "note": "协议栈上的挂载点，iptables/eBPF 的入口" },
-      { "name": "四元组与 socket", "note": "从端口到进程的最终匹配" },
-      { "name": "RSS 多队列", "note": "多核分摊收包，突破单核瓶颈" },
-      { "name": "路由查找", "note": "决定包是给本机、转发还是丢弃" },
-      { "name": "DPDK / 零拷贝", "note": "绕过内核协议栈的极端性能路线" }
+      {
+        "name": "NAPI 与 net_rx_action",
+        "note": "软中断轮询取包的配额机制",
+        "body": "`net_rx_action` 是 NAPI 软中断入口,从 poll_list 配额取包。丢包先看 rx_no_buffer_count,上涨就扩 ring buffer 或调 `net.core.netdev_max_backlog`。"
+      },
+      {
+        "name": "CUBIC 的三次曲线",
+        "note": "默认拥塞控制算法的凹增长",
+        "body": "CUBIC 把窗口恢复画成以丢包点为拐点的三次函数,凹段快速逼近上界、凸段试探。2.6.19 起成为默认直到今天。它的反馈信号是丢包,高 BDP 链路上估不满带宽,这正是 BBR 切入的地方。"
+      },
+      {
+        "name": "BBR 的四态机",
+        "note": "瓶颈带宽乘最小 RTT 建模",
+        "body": "STARTUP 指数提速探测 BtlBw,DRAIN 排空队列,PROBE_BW 周期换带宽估测,PROBE_RTT 每 10 秒收敛一次 RTT。不靠丢包反馈,能跑满长肥链路,混跑公平性靠 BBRv2/v3 补。"
+      },
+      {
+        "name": "TIME_WAIT 与 2MSL",
+        "note": "防旧段串扰的 60 秒等待",
+        "body": "四次挥手后主动关闭方停留 2*MSL(默认 60s),防止旧段被当成新连接数据。大量短连接下上万条是常态,先定量再决定动不动参。用 bind+SO_REUSEADDR 硬绕过会破坏 PAWS,别学。"
+      },
+      {
+        "name": "网络命名空间 netns",
+        "note": "每个容器独立的协议栈",
+        "body": "2.6.24 由 Eric W. Biederman 引入,每 netns 有独立路由表、iptables 和 net.* sysctl。宿主机改了 net.* 不会进容器,镜像里要自己设;`ip netns exec` 可窥容器协议栈。"
+      },
+      {
+        "name": "epoll 的 O(1) 唤醒",
+        "note": "万级 fd 上的可扩展事件模型",
+        "body": "Davide Libenzi 2003 年随 2.6 合入,把 select/poll 的 O(n) 全量扫描换成就绪链表加回调,注册的 fd 只在就绪时被唤醒。这是『万级连接一个线程』能成立的底层原因。"
+      }
     ],
-    "nextSteps": "用 strace -f 跟一次 curl 的系统调用，对比 recvfrom 的时机；开 tcpdump 看协议头逐层剥离；最后用 bpftrace 在协议栈各层打点，把一个包的旅程可视化。"
+    "nextSteps": "`ss -lnt` 看 Send-Q,`sysctl net.ipv4.tcp_congestion_control` 查算法,异常写进 `/etc/sysctl.d/99-tuning.conf`,再 `sysctl --system`。",
+    "books": [
+      {
+        "id": "tcpip",
+        "reason": "TCP 状态机、TIME_WAIT/PAWS、拥塞控制的权威出处,看 Vol.1 第 20 章与现代算法。"
+      },
+      {
+        "id": "linux-net",
+        "reason": "内核侧 NAPI/软中断与 sk_buff 实现,补 tcpip 的协议行为视角,看接收路径章节。"
+      }
+    ]
   },
   {
     "id": "clash-schedule",
     "keywordId": "clash-schedule",
-    "judgment": "Clash 收到一个连接只问三句话：这条流量归哪条规则？归哪个策略组？最终走哪个节点？三个问题答完，连接就发出去了——这就是调度链。",
-    "background": "Clash 是 2018 年由 Dreamacro 用 Go 写的代理客户端，核心卖点是「规则分流」：把国内直连、国外走代理这种逻辑写进 YAML，人人可配。2023 年原作者归档后，社区 fork 出 mihomo（原 Clash.Meta）继续维护，补了更多协议和内核特性。调度链是它一切行为的骨架：入站流量 → 规则匹配 → 策略组 → 出站节点 → 真实连接。",
-    "principle": "调度链四段：1) 入站（mixed/redir/tun 等）收到连接，拿到目标地址——可能是域名也可能是 IP。2) 规则匹配：按配置顺序逐条对 DOMAIN、DOMAIN-SUFFIX、IP-CIDR、GEOIP、PROCESS-NAME 等字段匹配，命中即绑定该规则，全部不中就落 MATCH 兜底。3) 策略组：规则指向的不是具体节点而是一个组，组负责「怎么选出口」——select 手动选、url-test 测速选最快、fallback 主备切换、load-balance 轮询，组还能嵌套组。4) 出站节点：真正的代理服务器（vmess/trojan/ss/vless），发出连接。心智模型：规则决定「这条流量归谁管」，组决定「怎么选出口」，节点才是真实的门。",
-    "metaPrinciple": "Clash 真正的发明不是某个代理协议，而是「决策点」的抽象：把「这条流量怎么办」从写死变成一条可配置的决策链。规则表是 if-else，策略组把「多选一」从规则里抽出来复用——这是关注点分离：规则只负责分类，选节点交给组。DNS 是这条链的隐藏地基：域名要解析成 IP 才能匹配 IP-CIDR 和 GEOIP 规则，FakeIP 模式则改写了「解析发生在哪、用什么 DNS」。所以 Clash 调不动的根因，往往不在规则本身，而在 DNS 解析链路和规则匹配链路之间的耦合。",
+    "opening": "打开 config.yaml 满屏找 `schedule:` 这个键,你会失望——clash/mihomo 里根本没这个顶层字段。但『每周换订阅』『5 分钟测速优选』『周一凌晨 4 点重发规则集』这些需求,却由三套节奏不同的时钟在悄悄执行:内核 `interval` 按秒,Clash Verge 按分钟,CFW 时代按小时。单位差 60 倍,抄错一个数,就是每 60 秒打一次机场订阅接口。要玩明白,先搞清楚:调度这摊活,到底谁在干。",
+    "sections": [
+      {
+        "heading": "三层时钟:内核、GUI、系统定时器各管一段",
+        "body": "调度没有独立模块,散在三层。最底层是内核 `proxy-providers`/`rule-providers` 的 `interval`,单位秒——2020 年 Premium 引入的原生定时拉取,失败用本地 path 缓存兜底;同层 `health-check.interval` 管节点存活探测。中间是 GUI:CFW(Fndroid)做成小时级内置定时;Clash Verge(zzzgydi,2022-03-04 V2EX 首发)按 profile 独立 `update_interval`,分钟、默认 1440 每日。最外层是系统定时器:服务器 cron/launchd,GitHub Actions 定时重生成规则集。"
+      },
+      {
+        "heading": "单位大战:小时、分钟、秒,抄错就 60 倍误差",
+        "body": "同一句『更新间隔』,三个实现单位完全不同:CFW 的订阅更新按小时;Clash Verge/Rev 的 profile 填的是分钟,1440 才是每日一次;mihomo 的 `interval` 按秒,3600 才是每小时。素材里有个真实事故:有人把 `proxy-providers.interval` 设成 60,以为是一小时,结果等于每分钟打一次机场订阅接口,把机场打爆、token 被风控封禁。另一个坑:`health-check` 的 url 用境外站点,直连环境全判失败,fallback 组全死、流量降级到 DIRECT。"
+      },
+      {
+        "heading": "定时更新≠定时生效:拉下来只是文件",
+        "body": "interval 到点后,内核只是把新文件拉到本地 path,不代表配置已生效。要生效必须 reload:mihomo 收到 SIGHUP 重读 config.yaml 热替换,在跑连接不中断;systemd 单元的 `ExecReload=/bin/kill -HUP $MAINPID` 干的就这个。千万别 `restart`,瞬间断流。服务器范式是先校验再热载:`0 4 * * 1  /usr/bin/mihomo -t -d /etc/mihomo && /bin/systemctl reload mihomo`。`-t` 只测不跑,语法错当场报,不至于把服务 reload 挂。"
+      },
+      {
+        "heading": "测速是测速,切换是切换:tolerance 才是防抖键",
+        "body": "`url-test` 组里的 `interval: 300` 是『每 5 分钟测一次速』,不是『每 5 分钟切一次节点』。真正决定动不动手的是 `tolerance`:新节点延迟比当前优,但要优出至少这个毫秒数才切。`tolerance: 50` 表示只快 30ms 时保持不动,防止网络抖动来回横跳;设 0 则风吹草动就切,忽快忽慢;设太大则坏节点切不走。`lazy: true` 让组『被用到才测』,省流量;`max-failed-times: 5` 连续 5 次失败判死。所以这里的定时不是单纯计时器,而是一套『周期采样 + 阈值死区』的健康判定控制器。"
+      },
+      {
+        "heading": "想按『时间+条件』切节点?自己用 controller API 拼",
+        "body": "内核给外部留了后门 external-controller:`curl -X PUT http://127.0.0.1:9090/providers/proxies/airport-a` 强制刷订阅;`PUT /proxies/Proxy -d '{\"name\":\"SG-01\"}'` 切 select 组。tankeito 的 clash-verge-auto-switch 即此模式:每 15/30 分钟测速,挑最快节点 PUT 给 controller,launchd 做调度。GUI 只提供傻瓜定时,『早 9 点切日本、晚 11 点切美国』这类条件调度得自己写脚本打 API。"
+      }
+    ],
     "angles": [
-      { "name": "设计模式：责任链 + 策略选择", "content": "规则是责任链（顺序匹配、命中即停），策略组是策略模式（一组可选出口、按策略选一个），两层模式叠起来就是调度链。" },
-      { "name": "概念拆解：规则 / 策略组 / 节点", "content": "分类、选路、连接三层各司其职：改配置前先想清楚要动的是哪一层，90% 的「为什么没生效」都能自己找到答案。" },
-      { "name": "风格架构：决策与连接分离", "content": "分流决策（走哪个出口）与真实连接（建 TCP）分离，是代理客户端的通用架构，Clash、sing-box 都长这样。" },
-      { "name": "原理分析：为什么 DNS 顺序决定分流对错", "content": "域名先被哪级 DNS 解析、会不会触发真实请求，决定你能不能匹配到 IP-CIDR / GEOIP 规则；FakeIP 就是把这个顺序整个翻转。" }
+      {
+        "name": "设计模式:定时拉取 + 缓存兜底",
+        "content": "provider 用『定时拉取 + 本地缓存兜底』,失败时复用旧文件不炸主流程;健康检查用 generate_204 小请求做存活探针——和 K8s liveness probe 完全同构。"
+      },
+      {
+        "name": "概念拆解:『更新间隔』其实是三套时钟",
+        "content": "CFW 小时 / Verge 分钟 / mihomo 秒,作用对象也各不同(订阅文件、profile、provider)。单位、作用对象、生效时机三个维度别混成一个『定时』。"
+      },
+      {
+        "name": "风格架构:拉配置与跑流量解耦",
+        "content": "provider 只管文件落地,reload 才切运行态;GUI 只管把配置翻译成 YAML,调度下放内核与系统定时器。每层职责单一,是典型分层。"
+      },
+      {
+        "name": "原理分析:url-test 不是定时器",
+        "content": "它是『周期采样 + 阈值判定』控制器:interval 定采样率,tolerance 定死区。interval 调小不会更快切节点,只会更频繁测速——这是最常被误解的点。"
+      }
     ],
     "practices": [
-      "规则顺序敏感：MATCH 兜底必须最后，宽泛规则放窄规则前面会截胡。",
-      "IP 类规则依赖先有解析结果：FakeIP 模式下域名没有真实 IP，IP-CIDR 规则要配合真解析或 no-resolve 理解。",
-      "url-test 组别滥用：每次连接都测速有开销，追求稳定用 select 或 fallback。",
-      "代理链别太长：每跳都加延迟和丢包概率，多跳只在特殊场景有意义。",
-      "改完配置要看 logs：Clash 会打印每条连接的匹配结果，调试分流先看日志。"
+      "interval 以秒计:3600 每小时、86400 每日;别抄 Verge 的分钟值 1440。",
+      "先 `mihomo -t` 校验,再 `systemctl reload`;别 `restart`。",
+      "health-check 用 generate_204,境外 url 全判死、流量降 DIRECT。",
+      "生产 provider interval 别低于 3600 秒,过低会打爆机场接口。",
+      "『按时间切节点』用 controller API + cron 自己拼,别指望 GUI 傻瓜定时。"
     ],
-    "example": "浏览器请求 google.com：mixed 入站收到 443 连接 → 命中规则 DOMAIN-SUFFIX,google.com,PROXY → PROXY 是 url-test 组 → 组测速选中日本节点 → 真实 TLS 连到日本节点 → 节点转发给 google。整条链在 YAML 里就是三行，而「走哪条规则、归哪个组、选哪个节点」是三个独立的决策。",
+    "example": "让『5 分钟测速、50ms 内不切』:`Auto: type: url-test, interval: 300, tolerance: 50, lazy: true`。落地再配一条 cron:`0 4 * * 1 mihomo -t -d /etc/mihomo && systemctl reload mihomo`。",
     "subTopics": [
-      { "name": "规则匹配链", "note": "DOMAIN / IP-CIDR / GEOIP / MATCH 的顺序匹配" },
-      { "name": "策略组 proxy-groups", "note": "select / url-test / fallback / load-balance" },
-      { "name": "出站节点 proxies", "note": "vmess / trojan / shadowsocks / vless 等协议出口" },
-      { "name": "FakeIP", "note": "假 IP 接管域名解析，改写 DNS 与规则的耦合" },
-      { "name": "TUN 模式", "note": "整机流量收进来走规则" },
-      { "name": "入站 inbounds", "note": "mixed / redir / tun 等入口形态" },
-      { "name": "代理链 proxy-chain", "note": "多跳出口，每跳都有代价" }
+      {
+        "name": "interval 的单位战争",
+        "note": "秒/分钟/小时差 60 倍",
+        "body": "CFW 按小时,Verge 的 update_interval 按分钟(1440=每日),mihomo provider interval 按秒。三套单位互相抄极易差 60 倍,把 1440 抄进 mihomo 就是每 24 分钟刷一次。"
+      },
+      {
+        "name": "SIGHUP 热重载",
+        "note": "kill -HUP 重读配置",
+        "body": "mihomo 收到 SIGHUP 重读 config.yaml 热替换,在跑连接不中断;systemd 的 `ExecReload=/bin/kill -HUP $MAINPID` 即此。restart 瞬间断流,reload 才是正解。"
+      },
+      {
+        "name": "url-test 的防抖语义",
+        "note": "interval 采样,差值小不切",
+        "body": "url-test 组按 interval 周期测速,新节点延迟比当前优至少 tolerance 毫秒才切换。tolerance: 0 会让抖动触发反复切换,50 是常用防抖值;lazy: true 则组被用到才测,省流量。"
+      },
+      {
+        "name": "失败兜底与旧缓存",
+        "note": "拉失败保留本地旧档",
+        "body": "provider 拉到一半失败时用本地 path 的旧缓存顶替,所以订阅 token 过期后内核『看起来一切正常』,直到节点全部失效才暴露。要配 health-check 和 max-failed-times 兜底,不能裸等。"
+      },
+      {
+        "name": "controller API 手动触发",
+        "note": "PUT /proxies 即时切换",
+        "body": "PUT /providers/proxies/airport-a 刷订阅;PUT /proxies/{group} 传 {\"name\":\"SG-01\"} 切组。macOS 上要主动优选,就用 launchd 定时调这套接口。"
+      },
+      {
+        "name": "GitHub Actions 重生成规则集",
+        "note": "schedule 定时跑脚本推 CDN",
+        "body": "社区规则集项目(Loyalsoldier/clash-rules)用 Actions 的 schedule 定时跑脚本生成 .yaml 推 CDN,再被 rule-providers 的 interval 拉走,是『规则集自我维护』的样板。"
+      }
     ],
-    "nextSteps": "打开自己的 Clash/mihomo 配置，把 rules、proxy-groups、proxies 三段逐条读一遍，画出「一条流量怎么走」的链；然后分别改一次规则和组，curl 看出口 IP 变化；最后读 DNS / FakeIP 配置，搞懂域名解析发生在哪一步。"
+    "nextSteps": "先改一处:把 provider 的 interval 调到 3600,reload 观察拉取;再给 url-test 加 tolerance: 50 看切换。进阶:写 10 行脚本,超 300ms 就 PUT 切组,丢进 launchd。",
+    "books": [
+      {
+        "id": "tcpip",
+        "reason": "代理调度本质是 TCP 连接转发与健康探测，读 TCP 连接管理、超时与重传章节，理解 url-test / fallback 的语义。"
+      }
+    ]
   },
   {
     "id": "clash-rule",
     "keywordId": "clash-rule",
-    "judgment": "Clash 的规则就是一张从上往下读的 if-else 表：逐条问『这符合吗』，第一条命中的生效。写规则的人决定判断顺序，Clash 只负责照顺序执行。",
-    "background": "早期代理只有「全局代理或直连」二选一，Clash 把分流逻辑从代码搬进 YAML：rules 段就是一张顺序表，「国内直连、国外走代理」从此变成可读可改的文本。mihomo 把匹配类型扩展得越来越全（域名、IP、GeoIP、进程、端口），但核心始终是「匹配字段 + 策略」的二元组。",
-    "principle": "每条规则 = 匹配条件 + 策略（PROXY / DIRECT / REJECT / 某个策略组）。匹配类型：DOMAIN（精确域名）、DOMAIN-SUFFIX（域名后缀，含所有子域）、DOMAIN-KEYWORD（域名包含关键字）、IP-CIDR（IP 网段）、GEOIP（按 GeoIP 库判国家）、SRC-IP（源 IP）、DST-PORT（目的端口）、PROCESS-NAME（进程名）、NETWORK（tcp/udp）、MATCH（匹配一切，做兜底）。匹配从上到下，命中即停。心智模型：一张从上往下读的 if-else，最后一行通常是 MATCH。",
-    "metaPrinciple": "规则表用的是「顺序匹配」这种最朴素的算法，但想让它真的能用，前提是「有足够的字段可以查」：域名规则查的是 DNS 解析出的名字，IP 规则查的是解析后的 IP，GeoIP 还要查离线库。所以规则体系的正确性依赖 DNS 解析链路：如果域名在 Clash 内部被 FakeIP 接管、拿不到真实 IP，IP-CIDR 和 GEOIP 规则就匹配不到。规则不是孤立语法，它是 DNS 决策的下游消费者——这也是 Clash 把 DNS 配置做成一等公民的原因。",
+    "opening": "2023 年 11 月删库潮之后,很多订阅从原版 Clash 语法迁到 mihomo,第一件事就是抄一条现成 rules。结果有人把 MATCH,proxy 写在第三行,后面跟着的 GEOIP,CN,DIRECT 从此成了摆设——整机流量全走代理,国内站点绕一大圈。查 /rules 接口才发现命中早停在第二条。这条规则的生死,全看你懂不懂它那条「先到先得」的顺序。",
+    "sections": [
+      {
+        "heading": "七种规则,三种维度:先分清再谈顺序",
+        "body": "Clash 的 rules 有七种基本动作——DOMAIN、DOMAIN-SUFFIX、DOMAIN-KEYWORD、IP-CIDR、GEOIP、DST-PORT 和兜底的 MATCH。它们横跨三层心智模型:DOMAIN 系列是应用层的 DNS 名字,DST-PORT 是传输层端口,IP-CIDR 和 GEOIP 是网络层地址。最容易栽的坑是语义差异:DOMAIN-SUFFIX,google.com 会连 x.google.com 一起匹配,而 DOMAIN-KEYWORD,google 是子串匹配,googleads 也会命中;DOMAIN 才是精确匹配。把三者混用,等于把路由规则写成了正则猜谜。"
+      },
+      {
+        "heading": "先到先得:为什么 MATCH 必须放最后",
+        "body": "规则按配置顺序逐条匹配,首条命中即停,后面再对也不看。这是整套模型的根,能解释两个高频事故:把 MATCH,proxy 写在中间,后面所有 GEOIP,CN,DIRECT 永不生效,整机全走代理;或 DOMAIN-SUFFIX,com,proxy 这种过宽规则把整个 .com 塞进代理,国内站点全部绕路。现象很典型——有些网站能开、有些永远直连不了,curl http://127.0.0.1:9090/rules 一看,命中停在倒数第二条。把它想成交换机接线员:第一个匹配的端口就接通,不问更优解。"
+      },
+      {
+        "heading": "2020 年 Premium 的 RULE-SET,把手写规则变成订阅",
+        "body": "规则列表动辄上千行,手写维护不现实。2020-09 Clash Premium v1.0 引入 rule-providers + RULE-SET,支持 url + interval 远程拉取并本地缓存。但 RULE-SET 长期是 Premium 闭源专属,开源内核没有。直到 2021-12 MetaCubeX fork 出 Clash.Meta,才把这条能力开源,还补上 GEOSITE、PROCESS-NAME、REGEX。今天 Loyalsoldier/clash-rules、ACL4SSR 这些社区项目把广告/直连/代理规则做成可拉取的分发品,就是 RULE-SET 最典型的现实用法。"
+      },
+      {
+        "heading": "behavior 三兄弟:domain / ipcidr / classical 别混用",
+        "body": "rule-provider 靠 behavior 声明文件内容格式:domain 只收域名、ipcidr 只收 CIDR、classical 按旧版全文规则。坑在于 behavior 必须与文件内容一致——把 ipcidr 列表塞进 behavior: domain 的 provider,轻则加载报错,重则静默丢规则,症状是某条该直连的流量突然走代理。2023-11 原版删库、Clash.Meta 改名 mihomo 后,这套生态定型成今天的模样:rules 里写一行 RULE-SET,reject,REJECT 就能引用远端规则集。注意 PROCESS-NAME 是客户端专属,搬到服务器上进程名对不上,规则等于不存在。"
+      }
+    ],
     "angles": [
-      { "name": "设计模式：顺序匹配 + 兜底", "content": "最朴素也最可控的匹配：优先级显式写在顺序里，一行一行读就能推演出任意流量的去向。" },
-      { "name": "概念拆解：匹配字段 vs 策略", "content": "「判什么」和「怎么办」分离：同一字段可以配任意出口，改策略不动匹配、改匹配不动出口。" },
-      { "name": "风格架构：配置即分流逻辑", "content": "把决策逻辑做成声明式 YAML，用户不改代码只改表；这是配置驱动设计在客户端软件里的典型应用。" },
-      { "name": "原理分析：为什么 GeoIP 不可靠", "content": "GeoIP 是离线快照、按 IP 段粗判国家，能告诉你「这 IP 是哪国的」，不能告诉你「该不该代理」——政策与实测是另一回事。" }
+      {
+        "name": "设计模式:策略表驱动分流",
+        "content": "分流决策被拆成一张可热加载的表,内核只做顺序匹配,改表不重编译,换规则即换行为。这正是防火墙规则表思想的下放,也是它比 Surge 更可脚本化的根因。"
+      },
+      {
+        "name": "概念拆解:首条命中 vs 最长匹配",
+        "content": "IP 路由和 iptables 讲究最长前缀或精确逐条,Clash 却是先到先得。理解这个差异,才懂为什么规则顺序本身就是优先级,位置错了再对的规则也白搭。"
+      },
+      {
+        "name": "风格架构:单二进制 + YAML 即代码",
+        "content": "Go 单二进制、规则随 YAML 配置走,可 -t 校验、可 kill -HUP 热重载。和 Surge 闭源付费、平台绑定形成对照,这也是规则能进入 CI 版本管理的前提。"
+      },
+      {
+        "name": "原理分析:GEOIP 与 no-resolve 的解析博弈",
+        "content": "GEOIP 和 IP-CIDR 要拿真实 IP 比对,缺 no-resolve 就强制先解析,等于把访问名单暴露给上游 DNS,还拖慢首访。这是四层匹配天然的成本,规则作者必须显式选择。"
+      }
     ],
     "practices": [
-      "兜底必须最后：MATCH 或 FINAL 放前面会把所有流量一把劫走。",
-      "具体在前、宽泛在后：DOMAIN-SUFFIX,example.com 要在 DOMAIN-KEYWORD,example 前面。",
-      "GeoIP 判「CN」不等于该直连：国内 IP 段上也可能跑着被墙的服务，看场景。",
-      "IP-CIDR 规则要理解 no-resolve：不写时 Clash 可能先解析域名，既多一步又可能泄露。",
-      "规则别堆太多：上万条 GEOIP 或域名列表会拖慢每个新连接的匹配，能抽到 rule-provider 就抽。"
+      "把 MATCH 永远放 rules 最后一行,写完用 mihomo -t 校验再 reload。",
+      "IP-CIDR 和 GEOIP 规则一律加 no-resolve,别让强制解析拖慢首访。",
+      "排障先 curl http://127.0.0.1:9090/rules,命中停在哪条一目了然。",
+      "rule-provider 的 behavior 和文件内容严格对应,domain 里绝不混 CIDR。",
+      "订阅自带的 PROCESS-NAME 规则部署到服务器前删掉,进程名对不上等于没有。"
     ],
-    "example": "rules: DOMAIN-SUFFIX,google.com,PROXY → DOMAIN-SUFFIX,baidu.com,DIRECT → IP-CIDR,192.168.0.0/16,DIRECT → GEOIP,CN,DIRECT → MATCH,PROXY。访问 google.com 命中第一条走代理；baidu 命中第二条直连；内网命中第三条；中国大陆 IP 命中第四条直连；剩下全部走代理。从上往下读，这就是一张完整的分流表。",
+    "example": "最小可用配置,rules 顺序就是分流契约:\n```yaml\nrules:\n  - DOMAIN-SUFFIX,cn,DIRECT\n  - DOMAIN-SUFFIX,google.com,proxy\n  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve\n  - GEOIP,CN,DIRECT\n  - MATCH,proxy\n```\ncurl http://127.0.0.1:9090/rules 返回前两条,命中即停。",
     "subTopics": [
-      { "name": "匹配类型", "note": "DOMAIN / DOMAIN-SUFFIX / IP-CIDR / GEOIP / PROCESS-NAME" },
-      { "name": "策略值", "note": "PROXY / DIRECT / REJECT / 策略组名" },
-      { "name": "MATCH 兜底", "note": "匹配一切的最后一条规则" },
-      { "name": "GEOIP 库", "note": "离线 IP 国家数据库" },
-      { "name": "no-resolve", "note": "控制 IP 规则是否触发 DNS 解析" },
-      { "name": "rule-provider", "note": "外部订阅的规则片段" },
-      { "name": "规则顺序与性能", "note": "命中即停，越靠前越常被查" }
+      {
+        "name": "DOMAIN-SUFFIX 与子域匹配",
+        "note": "后缀匹配连子域一起命中",
+        "body": "DOMAIN-SUFFIX,google.com 同时匹配 google.com 和 x.google.com,按点分域名的后缀判断。想精确锁一个域名用 DOMAIN,做广告拦截用 DOMAIN-KEYWORD 子串匹配(googleads 也会中)。三个语义别混,这是规则集出 bug 的高发点。"
+      },
+      {
+        "name": "GEOIP 与 GeoLite2",
+        "note": "按 IP 归属地分流,依赖 mmdb 库",
+        "body": "GEOIP,CN,DIRECT 靠 mmdb/GeoLite2-CN.mmdb 判断归属地,内核启动会加载。不写 no-resolve 会先解析域名拿 IP,等于把访问名单暴露给上游 DNS。自建分流常把它放在 MATCH 之前兜住国内流量。"
+      },
+      {
+        "name": "rule-providers 的 behavior",
+        "note": "声明文件内容格式,不可混用",
+        "body": "behavior 三种取值:domain 只收域名、ipcidr 只收 CIDR、classical 收旧版全文规则。加载时按 behavior 解析,混用会报错或静默丢规则。RULE-SET 引用后规则写成一行,远程内容靠 interval 定时拉取并缓存本地。"
+      },
+      {
+        "name": "DST-PORT 与免代理端口",
+        "note": "按目标端口分流,适合局域网服务",
+        "body": "DST-PORT 不触发 DNS 解析,适合把特定端口直接放行或拒绝。比如 DST-PORT,53,DIRECT 让 DNS 走本地,或按 SSH/RDP 端口放行内网。它和 IP-CIDR 同属不依赖域名的维度,配合 no-resolve 能少暴露解析。"
+      },
+      {
+        "name": "PROCESS-NAME 的部署陷阱",
+        "note": "客户端专属,服务器上等于没有",
+        "body": "PROCESS-NAME 按进程名匹配,是桌面客户端特性,服务器/网关部署时进程名对不上,规则静默失效。机场订阅自带的这类规则搬到无头机器前应删掉,否则看似有规则实则不生效。"
+      },
+      {
+        "name": "controller 的 /rules 接口",
+        "note": "运行时查看实际加载的规则",
+        "body": "curl http://127.0.0.1:9090/rules 返回当前生效规则数组,带 type/payload/proxy 字段,可 jq 切片看前几条。排障时对比它和配置文件,能定位「规则被前面吞了」这类顺序事故。注意它显示的是加载后的扁平列表,不是原始 YAML。"
+      }
     ],
-    "nextSteps": "拿自己的配置把 rules 从头读一遍，标注每条的策略；再想三个「该有但没写」的规则加进去看分流变化；最后研究 rule-provider，把高频规则抽成订阅。"
+    "nextSteps": "从最小规则集起步:先写 DOMAIN-SUFFIX,cn,DIRECT + MATCH,proxy 两行跑通,再逐条加 IP-CIDR/GEOIP 和 no-resolve。每条规则写完用 mihomo -t 校验、kill -HUP 热重载。稳定部分抽成 rule-provider 用 interval 拉取。排障时 curl /rules 看命中位置。",
+    "books": [
+      {
+        "id": "tcpip",
+        "reason": "规则匹配建立在对 IP 与 DNS 的理解上，读 IP 协议与 DNS 章节，才能讲清 DOMAIN / IP-CIDR / GEOIP 各自吃哪一路信息。"
+      }
+    ]
   },
   {
     "id": "fakeip",
     "keywordId": "fakeip",
-    "judgment": "FakeIP 是「先斩后奏」：连接一来先给个假 IP 把域名糊弄过去，真解析在代理内核内部完成。系统从头到尾没见过真 IP，也就无从泄露。",
-    "background": "传统代理流程是：系统先问 DNS 拿到域名的真实 IP，再把 IP 交给代理去连。这一步藏着隐私和一致性问题——DNS 请求可能走系统默认 DNS（运营商、或直连），真实 IP 就暴露给了中间人；而且不同设备解析结果不一致，分流会乱。FakeIP（Clash 2019 年起引入）用保留网段 198.18.0.0/16 的假 IP 映射域名，把「系统先解析」改成了「内核后解析」。",
-    "principle": "FakeIP 流程：1) 系统查某域名 → Clash 的 DNS 模块返回一个 198.18.x.y 的假 IP（同一域名固定同一个假 IP）。2) 应用以为拿到真 IP，拿假 IP 发起连接。3) Clash 收到目标为 198.18.x.y 的连接，查映射表还原出真实域名。4) 用真实域名做规则匹配 → 决定出口 → 在出口侧解析真实 IP → 建立真实连接。心智模型：假 IP 是「域名名字的占位符」，真实网络活动从不经过系统 DNS。",
-    "metaPrinciple": "FakeIP 能成立的前提，是代理内核掌握了 DNS 解析权：假 IP 只是别名，真正的解析发生在 Clash 内部、只发生一次并缓存。它解决的从来不是「如何正确分流」——规则还是要匹配真实域名和 IP——它解决的是「解析发生在哪、用谁的 DNS、会不会泄露」。这带来一个原理级取舍：凡是绕过 Clash 直接解析的流量（系统级硬编码的 DoH、App 自带的解析器），都拿不到假 IP，FakeIP 对它们不生效——这就是「FakeIP 生效有前提」的根源。",
+    "opening": "第一次见到 198.18.0.32 这种地址,多数人会在 dig 的输出里愣一下——它不是网关,不是 VPS,也不是哪个公网 IP。你只是 `dig @127.0.0.1 -p 1053 example.com` 了一下,内核就回了个这么个“假地址”。更魔幻的是,浏览器冲着这个假地址发起的连接,居然完整打开了 example.com。把域名变成保留段地址、用一张表记住映射、连接时再还原成域名,这套机制就是 fake-ip。",
+    "sections": [
+      {
+        "heading": "redir-host 为什么会翻车:共享 IP 时代的地址反查",
+        "body": "2019 年前后,透明代理把 TUN 流量接进来时,内核手里只有目标 IP,没有域名。早期方案 redir-host 的思路是:DNS 解析时返回真实 IP,同时记下“这个 IP 对应哪个域名”,等连接进来再反查。独享 IP 的 VPS 时代这套没问题,CDN 铺开后直接崩——几十个域名共用一个边缘节点 IP,反查表里存哪个?按域名分流的规则全部失准。2023 年原版 Clash 把 redir-host 从配置里移除,大批老订阅报 `invalid dns enhanced-mode: redir-host`(clash-verge issue #461 就是现场)。mihomo 虽然恢复了 redir-host 并用 sniffer 从 TCP 首包读 SNI 补地址,主流路径已经彻底倒向 fake-ip。"
+      },
+      {
+        "heading": "假地址从哪来:为什么偏偏是 198.18.0.0/16",
+        "body": "假地址不能随便挑。RFC 1918 私网段会跟真实内网撞车——给家里设备发 192.168.x 的假地址,访问 NAS 时可能真的连上别的东西。fake-ip 用的是 198.18.0.0/16,这是 RFC 2544 专为网络基准测试保留的 Benchmark 段,既非公网也非私网,正常设备永远不会往这段发包。内核从池子里给每个域名分配一个稳定地址,同一个域名 dig 两次都返回 198.18.0.32,因为 LRU 表把“域名↔假地址”记死了。多设备、多进程共享同一映射,连接识别零歧义。选这段的讲究被很多人忽略:假地址必须落在“地球上没人用”的网段。"
+      },
+      {
+        "heading": "还原那一刻:从 connect 到域名,规则怎么接棒",
+        "body": "浏览器拿到 198.18.0.32 照常 `connect`。内核收包后查 fake-ip 表,把目标从假地址还原成 example.com,才交给规则引擎。这就是为什么 fake-ip 模式下域名规则(DOMAIN-SUFFIX、RULE-SET)总能命中,而 IP-CIDR、GEOIP 几乎永远失效——它们匹配到的是假地址,不是真实 IP。2023-2024 年 mihomo 把控制做得更细:`fake-ip-filter` 默认黑名单模式,放行局域网、NTP、腾讯登录域名这类必须拿真实 IP 的项;切 `whitelist` 则语义反转,只有列表内域名才用假地址;v1.18+ 还并存 `fake-ip-pool` 作为 `fake-ip-range` 的等价字段名。"
+      },
+      {
+        "heading": "TUN 是 fake-ip 的前置条件:一次“Google 打不开”事故",
+        "body": "FlClash issue #1993 记了一个经典事故:TUN 模式开着,但 DNS 没被劫持。系统照旧直连 8.8.8.8 查询,拿到的是真实 IP,连接也按真实 IP 建立——域名规则全被架空,症状是“系统代理能开 Google,TUN/游戏打不开”。fake-ip 的一切都建立在“所有 DNS 请求必须进内核”这个前提上,所以 TUN 里必须配 `dns-hijack` 把 any:53 的流量截下来。记住:fake-ip 不是 DNS 优化,是一整套接管寻址的拦截链,断一环整体失效。"
+      }
+    ],
     "angles": [
-      { "name": "设计模式：惰性解析 + 别名", "content": "先用占位符延迟真正昂贵的解析，直到需要时做一次并缓存；假 IP 就是域名的别名，连接时再兑现。" },
-      { "name": "概念拆解：解析在哪 vs 用谁解析", "content": "「位置」（内核内还是系统）和「来源」（哪级 DNS）是两个独立维度，FakeIP 改变的是位置，不改变分流规则本身。" },
-      { "name": "风格架构：控制面解析与数据面连接", "content": "解析在控制面完成并缓存，数据面只认假 IP 别名；两边解耦，连接建立不再依赖系统 DNS 的实时性。" },
-      { "name": "原理分析：为什么 FakeIP 不治 DNS 泄露", "content": "它只拦截 Clash 自己能看到的 DNS 查询；拦截不到的那部分流量照样走系统 DNS，所以它不是泄露免疫，是泄露面收窄。" }
+      {
+        "name": "设计模式:地址即映射表",
+        "content": "先发一个确定性占位地址,把真实语义(域名)推迟到连接时再查。解析从网络往返里挪走,连接直接建在本地表上,零额外 DNS 等待,代价是 IP 维度规则失效。"
+      },
+      {
+        "name": "概念拆解:先假后真 vs 先真后猜",
+        "content": "redir-host 先解析出真实 IP 再按 IP 反查域名,共享 IP 下必歧义;fake-ip 干脆不解析,先发 198.18 假地址,连接时再还原域名并解析。一个先真后猜,一个先假后真。"
+      },
+      {
+        "name": "风格架构:三层拦截链",
+        "content": "DNS 代答出假地址、连接时查表还原域名、规则引擎按域名分流,三层环环相扣。配置调的不是一个开关,而是让整条寻址链路内聚进内核,TUN 少了 dns-hijack 就断链。"
+      },
+      {
+        "name": "原理分析:泄漏点搬家了",
+        "content": "域名只在连接建立时于内核侧解析,客户端到上游 DNS 的查询被内核代答,应用层暴露域名大幅减少。泄漏风险并未消失,只是搬到了 fallback-filter 与 proxy-server-nameserver,别指望 fake-ip 挡一切。"
+      }
     ],
     "practices": [
-      "fake-ip-range 要配好路由：198.18.0.0/16 的流量必须能进 Clash（TUN 模式默认处理，其余入口要自行保证）。",
-      "fake-ip-filter 别乱加：被过滤的域名走真实解析，加多了等于自己把泄露面打开。",
-      "别依赖 IP 类规则分流：系统拿到的是假 IP，IP-CIDR / GEOIP 在 FakeIP 模式下意义有限，规则多用域名型。",
-      "假 IP 是长期别名：域名换了真实 IP，只要映射缓存没失效，连接仍指旧解析。",
-      "服务端看到的源 IP 不再是你的系统 IP：出口 NAT 发生在 Clash / 节点侧，跟「你连了谁」是两回事。"
+      "先 `dig @127.0.0.1 -p 1053 example.com +short`,确认返回 198.18.x 再往下调。",
+      "`fake-ip-filter` 放上 `*.lan`、`*.local`、NTP 域名,否则打印机和 NAS 互相找不到。",
+      "腾讯登录域名 `localhost.ptlogin2.qq.com` 记得 filter,否则网页登录反复转圈。",
+      "fake-ip 模式下少写 IP-CIDR/GEOIP,域名分流全靠 DOMAIN-SUFFIX 和 RULE-SET。",
+      "TUN 下务必配 `dns-hijack` 截 any:53,否则 DNS 直查拿真 IP,fake-ip 整体失效。"
     ],
-    "example": "浏览器访问 example.com，nslookup 得到 198.18.0.5——假的。连接 198.18.0.5:443 → Clash 查映射还原出 example.com → 命中 DOMAIN-SUFFIX 规则 → 走代理 → 远端解析真 IP。全程你的系统只知道假 IP，真 IP 只在 Clash 内部和出口侧出现过。",
+    "example": "把配置里 `enhanced-mode: redir-host` 改成 `fake-ip`,重启 mihomo,再验证映射:dig 两次都返回 198.18.0.15,地址稳定不变。此时 `curl -x http://127.0.0.1:7890 https://github.com` 照常出内容,开 debug 日志能看到 `[UDP] fake-ip 198.18.0.15 -> github.com`——假地址当场被还原成域名,规则按域名接棒分流。",
     "subTopics": [
-      { "name": "198.18.0.0/16", "note": "FakeIP 使用的保留网段" },
-      { "name": "fake-ip-filter", "note": "不走 FakeIP 的域名白名单" },
-      { "name": "惰性解析", "note": "假 IP → 真域名的还原时机与缓存" },
-      { "name": "系统 DNS vs 内核 DNS", "note": "解析发生在哪，决定泄露面" },
-      { "name": "TUN 与 FakeIP", "note": "整机接管时如何路由假 IP 段" },
-      { "name": "DNS 泄露", "note": "什么流量会绕过内核解析" },
-      { "name": "与 TrueIP 模式对比", "note": "诚实地立即解析，另一种取舍" }
+      {
+        "name": "fake-ip-range 与 fake-ip-pool",
+        "note": "同字段两个名,别当写错",
+        "body": "原版 Clash 用 `fake-ip-range`,mihomo v1.18+ 新增 `fake-ip-pool` 作等价字段名,两个都认。范围一般取 198.18.0.1/16,足够几百万域名使用。"
+      },
+      {
+        "name": "fake-ip-filter-mode",
+        "note": "黑名单还是白名单",
+        "body": "默认 `blacklist`:列表内域名拿真实 IP,其余走假地址。切 `whitelist` 语义反转,只有列表内域名用 fake-ip。很多人切反导致所有域名直连解析,规则直接架空。"
+      },
+      {
+        "name": "sniffer 域名嗅探",
+        "note": "redir-host 的救火队员",
+        "body": "mihomo 恢复 redir-host 后靠 sniffer 补缺陷:开启后内核读 TCP 连接首包的 TLS SNI 或 HTTP Host,把真实 IP 对应域名补出来再走规则。明文 HTTP 可靠,加密流量握手差异会漏。"
+      },
+      {
+        "name": "dns-hijack",
+        "note": "TUN 抢 DNS 的关键",
+        "body": "fake-ip 要接管解析,TUN 段必须配 `dns-hijack` 截下 any:53 的查询,否则系统仍走系统 DNS 拿到真实 IP。stack 用 mixed 时 UDP/TCP 的 53 都要 hijack。"
+      },
+      {
+        "name": "fake-ip 与规则引擎的接棒",
+        "note": "假地址会架空 IP 规则",
+        "body": "还原发生在规则匹配之前,所以域名规则始终命中,而 IP-CIDR/GEOIP 匹配到的是 198.18.x 假地址、几乎永远不中。fake-ip 模式下写规则要忘掉 IP 维度,只信域名。"
+      },
+      {
+        "name": "198.18.0.0/16 的来源",
+        "note": "RFC 2544 基准测试段",
+        "body": "这段既非公网也非私网,是 RFC 2544 专为网络基准测试保留的 Benchmark block,正常设备不会发包到这段,拿来当假地址永不与真实网络冲突。"
+      }
     ],
-    "nextSteps": "在自己配置里开 fake-ip，nslookup 一个域名确认返回 198.18.x.x；再开 TUN 抓包，看有没有真实 DNS 请求漏出去（找泄露面）；最后读 fake-ip-filter 默认列表，理解哪些域名被排除、为什么。"
+    "nextSteps": "改自己配置的 `dns:` 段为 `enhanced-mode: fake-ip`,在 `fake-ip-filter` 补上 `*.lan`、`*.local` 和腾讯登录域名。`mihomo -t` 校验后重启,dig 看 198.18.x、curl 验链路,最后开 debug 日志确认 `fake-ip -> domain` 还原。",
+    "books": [
+      {
+        "id": "csapp",
+        "reason": "第 11 章网络编程讲清 DNS 解析与 connect 的系统调用链——fake-ip 拦截的正是这两步之间。"
+      },
+      {
+        "id": "tcpip",
+        "reason": "第 2 章 DNS 与 CDN 解释 redir-host 为何在共享 IP 下必败,即 fake-ip 诞生的根。"
+      }
+    ]
   },
   {
     "id": "proxy-deploy",
     "keywordId": "proxy-deploy",
-    "judgment": "在服务器上部署代理出口，本质就两件事：装一个能跑代理协议的服务，和一个能开机自启的守护进程。剩下的全是选址、限速和防被墙的讲究。",
-    "background": "自建代理节点的需求来自「出口要可控、要稳定、要有自己的 IP」。从 shadowsocks（2012，协议选得聪明、能躲特征检测）到 v2ray（2015，多协议多传输）再到 trojan / vless（伪装成 TLS / 长连接），再到 sing-box / mihomo 的多协议聚合，部署方式也从手写 systemd 进化到面板 + Docker 一键。底层其实没变过：一个服务监听端口、一个守护进程、一台带宽和 IP 都够用的机器。",
-    "principle": "部署一个节点只要五步：1) 选机器——带宽、延迟、地区（决定出口 IP 归属）、被墙风险。2) 装服务——sing-box / xray 等，写配置：inbound 监听端口 + 协议 + 认证，outbound 走真实网络。3) 起守护——systemd unit 或 Docker，restart=always，开机自启。4) 本地连入——本地 Clash/mihomo 加一个 proxy 条目，指向 服务器IP:端口。5) 验证——curl 到 ip-api.com，看出口 IP 是不是服务器的。心智模型：服务端就是一个「接受加密代理协议、代为发请求」的转发内核，只是换了专用协议和加密。",
-    "metaPrinciple": "一个代理转发本身这么简单，为什么会有十几套协议和无数的教程？因为核心挑战不是转发，而是在流量被深度检测（DPI）的环境里让连接「既通又不像代理」——协议设计的重心在混淆、TLS 伪装、与标准 HTTPS 的不可区分。所以选协议就是选「和什么流量长得像」。另一个原理是「出口在哪，你看到的世界就在哪」：代理只是把出口搬到服务器，所有被墙、被限速、被监测的问题都平移到服务器侧——节点选址和服务器网络质量，才是稳定性的真正来源。",
+    "opening": "凌晨两点, 一台境外 VPS 的告警邮件把你从被窝里捞起来: 「We detected unusual outbound traffic on your IP, mainly port 7890.」 顺着日志一查, 是上礼拜图省事把 mihomo 的 mixed-port 绑成了 0.0.0.0:7890, 又没配防火墙, 公网扫描器几分钟就把你当成了免费代理, 出口 IP 被刷进风控名单。这不是段子, 是 2023-2024 年无数“把 Clash 搬上服务器”的人踩过的同一个坑。proxy-deploy 讲的正是这件事: mihomo 从你桌面双击的进程, 变成一台无头机器上开机自启、崩溃自愈、替整网出网的常驻服务, 中间隔着一整套 systemd 单元、权限能力和防火墙的工程细节。",
+    "sections": [
+      {
+        "heading": "从 `clash -d` 到 systemd: 一台机器的三个阶段",
+        "body": "2019 年的典型用法是 `clash -d /etc/clash` 手动起一个进程, 终端里 export http_proxy=https_proxy=127.0.0.1:7890 就够桌面场景, 但一关终端代理就没了。2020 年, Premium 闭源线把 TUN 模式和 iptables 透明代理带进来, allow-lan 一开, 内核直接变成软路由, 一个局域网共享一个出口。2021 年之后, mihomo 内核加 systemd 成为服务器和软路由的标准姿势。三个阶段的分水岭是同一个问题: 要不要无人值守地活着。单机模式死了你随时重开, 服务器模式死了整网断网。所以把 mihomo 想成 nginx 最顺手——它不是一个程序, 是一个服务, 部署的全部工作就是让它被 systemd 托管、按信号热重载、按配置自愈。"
+      },
+      {
+        "heading": "systemd 单元里最容易翻车的三个字段",
+        "body": "抄来的单元文件, 翻车点集中在三个字段。第一是能力: TUN 建虚拟网卡要摸内核网络栈, 必须给 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE, 少一个都是建 tun 时报 permission denied。第二是文件描述符: LimitNOFILE 默认 1024, 高并发连接一上来就是 too many open files, 很多人直接塞到 1000000。第三是重载方式: ExecReload 配成 /bin/kill -HUP $MAINPID, systemctl reload 走的是热重载, 只换配置不换进程; 而 systemctl restart 会把在途连接全部掐断, 线上切节点那一下全线闪断。记住这个口诀: reload 换配置, restart 换进程。为什么这么较真? 因为 restart 会先杀进程再拉新进程, 监听端口重新 bind, 正在传的大文件和保持的 SSH 会话全被打断; 而 HUP 只是重读配置, 连接池原地重建, 用户无感, 改配置从此变得廉价。再配上 Restart=on-failure 和 RestartSec=5, 进程崩溃五秒内自己爬起来, 这才是常驻该有的样子。"
+      },
+      {
+        "heading": "allow-lan: true 不等于网关, 也不等于安全",
+        "body": "很多人以为开个 allow-lan 就能让局域网共享出口, 结果是把 mixed-port 整个暴露给了全世界。2023 年删库潮之后, 软路由和 VPS 部署激增, 公网扫描器对着 7890 这种默认端口全端口扫, 一旦撞上没配 secret 的 external-controller, 陌生人不仅能蹭你的流量, 还能直接 PUT /proxies 把你的节点改成他的, 出口 IP 被人拿去跑爬虫, 第二天节点就被封了。正确收口是三层: 第一, bind-address 只绑内网 IP, 别用星号; 第二, 云安全组或 ufw 只放行指定网段进来的流量; 第三, external-controller 配强随机 secret。防火墙放行端口的粒度, 决定了你是“软路由”还是“免费代理”。"
+      },
+      {
+        "heading": "部署不是终点: 自检与热载之间的运维日常",
+        "body": "部署完别急着收工, 先自检一遍。curl -x http://127.0.0.1:7890 http://cp.cloudflare.com/generate_204 应该返回 204; 再 curl -x socks5h://127.0.0.1:7890 https://api.ipify.org, 出口 IP 必须等于你选的节点, 不一致就说明代理链路压根没生效。之后订阅更新、节点测速、规则集刷新这些“跑起来之后的事”都交给 interval 和 cron(见 clash-schedule 词条), 部署层只负责一件长期的事: 观察。journalctl -u mihomo -f 盯启动日志, ss -tlnp 看端口监听, 必要时 tcpdump 抓包确认有没有直连了不该直连的域名。还有一条别漏: 服务器上没有 GUI 的进程名, 订阅里桌面向的 PROCESS-NAME 规则和 external-ui 要在部署时清掉, 否则就是“看似有规则实则不生效”。习惯之后你会发现, 部署是一次性的活, 运维才是长跑: 靠日志、端口、抓包三样工具把内核盯住, 它才有资格谈节点续期、订阅更新这些后续的事。"
+      }
+    ],
     "angles": [
-      { "name": "设计模式：协议伪装", "content": "代理协议模仿 TLS / HTTPS，让 DPI 分不清真实流量与代理流量；trojan、vless+tls、reality 都是这条路。" },
-      { "name": "概念拆解：inbound / outbound / 认证", "content": "服务端三个基本件：入口（协议+端口）、出口（真实网络）、认证（密码/密钥）。配置无非是把这三样写清楚。" },
-      { "name": "风格架构：单机最小 vs 面板化", "content": "systemd + 配置文件足够跑稳一个节点；面板（3x-ui 等）提供 Web 管理，但引入更多攻击面，取舍要清楚。" },
-      { "name": "原理分析：为什么协议会「过气」", "content": "被墙方会针对协议特征做识别，识破就换伪装；协议迭代是被迫的猫鼠游戏，不是技术洁癖。" }
+      {
+        "name": "设计模式：服务守护",
+        "content": "把内核当 nginx 托管: systemd 的 Type=simple 加 Restart=on-failure 保证崩溃自愈, ExecReload 指向 kill -HUP 做热重载, 再按最小权限给能力。部署成败, 看的是无人值守时它能不能自己活下去。配好之后, 重启服务器、内核崩溃、订阅更新都不用人守着。"
+      },
+      {
+        "name": "概念拆解：三种接管方式",
+        "content": "mixed-port 是应用层代理, 必须进程认代理才会走; TUN 是虚拟网卡, 连不认代理的程序也全局接管; iptables 透明代理活在转发面, 要 root 且必须防火墙收口。桌面用前者, 服务器和软路由用中间那个, 别混。"
+      },
+      {
+        "name": "风格架构：无头 vs 桌面",
+        "content": "桌面端 Clash Verge Rev、Mihomo Party 把配置塞进 GUI; OpenClash 则把 mihomo 打包成 OpenWrt 插件。服务器走的是无头形态: 纯配置文件加守护进程, 配置进 git 可版本管理、可 diff、可 mihomo -t 校验。说白了, 服务器上每一行配置都值得进 git 留痕, 出问题能回滚。"
+      },
+      {
+        "name": "原理分析：HUP 热重载",
+        "content": "内核主循环一直握着在途连接, 收到 SIGHUP 只重读配置、重建连接池, 进程不退出; restart 则是先 SIGTERM 杀掉再拉起, 在途 TCP 全部 RST。这就是 reload 和 restart 的本质差别, 也是线上敢用前者的底气。"
+      }
     ],
     "practices": [
-      "别用默认端口和默认口令：扫描器几秒内就能枚举一遍，443 这种固定端口反而最容易被探测。",
-      "防火墙只放行必要端口：节点端口被扫是常态，fail2ban 或限流能挡住大部分暴力尝试。",
-      "用非 root 用户跑服务：降低被攻破后的危害面。",
-      "定期换认证和端口：密钥泄露后至少能止血，别一套配置用三年。",
-      "先测出口 IP 再交付：curl ip-api.com 确认分流与伪装真的生效，别连上了发现出口不对。"
+      "部署前先跑 mihomo -t -d 校验配置, 看到 test successful 再写进 systemd, 别把坏配置直接 enable, 坏了先在本机改",
+      "systemd 单元里 AmbientCapabilities 三件套和 LimitNOFILE 一个都不能省, 否则 TUN 建不起来、高并发爆文件描述符",
+      "mixed-port 用 bind-address 绑内网段, 安全组和 ufw 只放行指定网段, external-controller 配上强随机 secret, 端口开得越宽风险越高",
+      "部署后用 curl 打 generate_204 验链路通不通, 再用 api.ipify.org 核对出口 IP, 不一致就是链路没生效",
+      "给终端和 CI 配 no_proxy, 排除 localhost、内网和云厂商 metadata 地址, 防止请求环路和鉴权失败"
     ],
-    "example": "一台香港 VPS（50Mbps），装 sing-box，配 trojan + TLS 监听 8443，systemd 拉起，本地 mihomo 加一个节点指向 hk-node:8443。curl ip-api.com 显示出口是香港——部署完成。难点从来不是装起来，而是被墙后怎么让协议活着、被扫后怎么保住机器。",
+    "example": "一台刚重置的 Ubuntu VPS, 任务只有一个: 让这台机器自己走日本节点出网。别急着写服务, 先在命令行跑一遍 mihomo -d /etc/mihomo, 看日志有没有报错, 再写 systemd 单元、daemon-reload、enable --now。等它起来, 按顺序敲两行:\ncurl -s -o /dev/null -w '%{http_code}\\n' -x http://127.0.0.1:7890 http://cp.cloudflare.com/generate_204\n204\ncurl -s -x socks5h://127.0.0.1:7890 https://api.ipify.org\n45.76.8.1\n看到 204 和那个日本 IP 同时出现, 悬着的心才放下, 这才敢把 ssh 的 ProxyCommand 和 docker daemon 的代理指过去, 宣告部署完成。最后别忘了 systemctl enable 开机自启, 免得重启后出口静悄悄消失。",
     "subTopics": [
-      { "name": "协议选择", "note": "vmess / trojan / shadowsocks / vless 的取舍" },
-      { "name": "sing-box / xray", "note": "现代多协议服务端" },
-      { "name": "systemd 守护", "note": "开机自启与崩溃重启" },
-      { "name": "端口与 TLS", "note": "伪装与端口选择的学问" },
-      { "name": "防火墙与限流", "note": "fail2ban、iptables 只放行必要端口" },
-      { "name": "面板 vs 配置文件", "note": "3x-ui 等管理面板的取舍" },
-      { "name": "节点质量验证", "note": "延迟 / 丢包 / 出口 IP 检测" }
+      {
+        "name": "TUN 模式部署",
+        "note": "虚拟网卡全局接管",
+        "body": "TUN 会建一张虚拟网卡接管整机流量, 配合 auto-route 抢路由表、dns-hijack 抢 DNS 查询。systemd 下必须先给 CAP_NET_ADMIN 和 CAP_NET_RAW, 否则建 tun 直接 permission denied。如果没劫持 DNS, fake-ip 就失效, 域名规则全部架空(详见 fakeip 词条)。"
+      },
+      {
+        "name": "网关模式(allow-lan)",
+        "note": "局域网共享代理出口",
+        "body": "把 allow-lan 开成 true, 内核就开始监听局域网, 本机和内网机器把 http_proxy 指过去就能共享出口。但必须同时做三件事: bind-address 绑内网 IP、安全组只放行指定网段、external-controller 加 secret, 否则就是裸奔的开放代理。"
+      },
+      {
+        "name": "systemd 常驻",
+        "note": "开机自启崩溃自愈",
+        "body": "单元用 Type=simple, 配 Restart=on-failure 和 RestartSec=5, 崩溃后自动拉起; ExecReload 指向 /bin/kill -HUP $MAINPID 做热重载。再加 After=network-online.target, 保证有网才启动, 免得开机那一下没有网络全失败。写成单元之后, 关机再开机它自己会回来, 日志统一进 journald, 排查也顺手。"
+      },
+      {
+        "name": "热重载 vs 重启",
+        "note": "热重载换配置不断流",
+        "body": "kill -HUP 让内核重读配置、重建连接池, 在途连接不断; systemctl restart 是先杀进程再起, 全线闪断。所以线上改订阅、改规则、换节点一律走 systemctl reload, 别图省事用 restart。"
+      },
+      {
+        "name": "开放代理事故",
+        "note": "裸奔被扫描成免费代理",
+        "body": "2023 到 2024 年的部署潮里, mixed-port 绑 0.0.0.0 又不设防火墙的服务器, 被公网扫描器扫到后当免费代理用, 出口 IP 被滥用、节点被封、境外 VPS 被风控。典型特征: 日志里一坨陌生 IP 在连 7890 端口。"
+      },
+      {
+        "name": "环境变量代理",
+        "note": "让不认代理的进程走代理",
+        "body": "export https_proxy=http://127.0.0.1:7890 这类变量只对认环境变量的进程生效, 对不认变量的程序完全透明, 想全局接管只能靠 TUN。而且变量是进程级继承, systemd 拉起的服务不受你终端 export 影响, Docker daemon 得单独写 drop-in 文件。记得配 no_proxy, 否则 169.254.169.254 的云 metadata 被塞进代理, 鉴权直接失败。"
+      }
     ],
-    "nextSteps": "用自己的服务器跑一次最小部署：装 sing-box 配 trojan、systemd 起服务、本地连上并 curl 验证出口 IP；然后做一次「换端口 + 开防火墙 + 限流」加固；最后对比 vmess / trojan / vless 的抓包特征，理解伪装差在哪。"
+    "nextSteps": "第一步, mihomo -t -d 校验配置; 第二步, 写 systemd 单元, 补齐能力、文件描述符、HUP 重载三件套; 第三步, 收紧网络面, 收 bind-address、防火墙、secret 三道口; 第四步, enable --now 后用 generate_204 和 ipify 自检; 第五步, 把订阅更新和节点测速交给 interval 或 cron, 详见 clash-schedule 词条。",
+    "books": [
+      {
+        "id": "linux-net",
+        "reason": "服务器网络栈、防火墙与端口转发的落地基础，配合 systemd 守护理解服务生命周期与故障排查。"
+      }
+    ]
+  },
+  {
+    "id": "k8s-crd",
+    "keywordId": "k8s-crd",
+    "opening": "2015 年，OpenShift 想要一种叫 DeploymentConfig 的对象，Rancher 想要自己的 cattle，两家的答案出奇一致：fork kubernetes/kubernetes，改上游源码。上游当然不可能为每家的私有类型合并代码。这个『想扩展却只能 fork』的死结，逼出了 k8s 后来最值钱的机制——不动一行 apiserver 源码，apply 一份 YAML，集群里就多了一种全新的 API 资源类型。",
+    "sections": [
+      {
+        "heading": "2016 年的 TPR 死得明白：零 schema 校验的代价",
+        "body": "TPR 在 2016 年 3 月的 1.2 里以 extensions/v1beta1.ThirdPartyResource 登场，是 SIG API Machinery 给『第三方想加资源类型』开的第一个口子。但它的设计处处透着敷衍：只能命名空间级、版本写死 v1、连 schema 校验都没有——用户 PUT 进去任意结构的 JSON 都能落 etcd。数据还按 TPR 自己的 namespace 存，跨命名空间 list 别扭到没法用；客户端要先 GET 到 TPR 再猜 plural 才能找到数据。1.7 里 CRD 一出来它就被标记弃用，1.8 直接移除，两套机制只在 1.7 并存过一个小版本。"
+      },
+      {
+        "heading": "结构性 schema：v1 GA 最狠的一刀，也是静默丢字段的根源",
+        "body": "2019 年 6 月，Stefan Schimanski 的《Future of CRDs: Structural Schemas》定调：schema 必须收敛到 OpenAPI v3 的素子集，只留 properties、items、type、nullable 等六个构造，每个子 schema 只能选其一，根级 additionalProperties 禁止。三个 x-kubernetes-* 扩展补齐 Go 特有类型。结构性是 pruning 的前提：字段不在 schema 里就被 API server 静默裁掉，Kubeflow 1.1.0 在 1.18 装不上，就是 seldon 的 CRD 里 protocol 字段非法。"
+      },
+      {
+        "heading": "v1 那 7 条破坏性改动，升级时一条条怎么咬人",
+        "body": "1.16（2019-09-18）CRD 转正。v1 的破坏项像一张账单：openAPIV3Schema 必填且须结构性；pruning 默认开，preserveUnknownFields 被禁止；scope 无默认值；version、validation、subresources 全挪到 versions[*] 下；JSONPath 改名 jsonPath。外加一条软约束：*.k8s.io 域下的 CRD 必须带 api-approved.kubernetes.io 注解指向 API review PR。老 v1beta1 YAML 拿过来 apply 基本全红。"
+      },
+      {
+        "heading": "1000 个 CRD 能拖垮 apiserver：一个 zap logger 吃掉 1.5 GiB",
+        "body": "KubeCon EU 2022 上 Alper Rifat Ulucinar 讲了一个翻车：装 1000+ 个 CRD 把 apiserver 干到中断。根因——请求进 crdHandler，每个 CRD 实例化一个 NewStorage，各自建一个独立 etcd3 client，每个 client 又拉一个 zap logger。实测 1900 个 CRD 时 apiserver RSS 约 8 GiB，其中约 1.5 GiB 被这些 logger 吃掉。修复是共享单个 etcd3 client logger，v1.25 合入并 backport 到 1.22–1.24。"
+      },
+      {
+        "heading": "CEL 进了 schema：『磁盘只能变大』终于不用写 webhook",
+        "body": "以前想校验『磁盘大小只能增不能减』，只能写 validating webhook。KEP-2876 从 2021 年磨到 1.25 beta、1.29 GA，把 CEL 塞进 schema：x-kubernetes-validations 里用 self 指当前值、oldSelf 指变更前值，rule: self >= oldSelf 一条表达式就表达出单调性。要注意执行成本预算——表达式写复杂了 apiserver 会拒收，报错原文是 estimated rule cost exceeds budget by factor of more than 100x，让你加 maxItems、maxLength 这类约束帮它评估。"
+      }
+    ],
+    "angles": [
+      {
+        "name": "设计模式：声明式 YAML 生成 REST 端点",
+        "content": "CRD 是元编程：apply 一份 YAML，apiserver 进程内动态注册出 /apis 下的资源路径、etcd 存储与 OpenAPI 文档。数据面是模板，控制面由 Operator 消费。"
+      },
+      {
+        "name": "概念拆解：CRD 与 API Aggregation 两条扩展路",
+        "content": "CRD 轻量，跑在 apiextensions-apiserver 进程里；API Aggregation 重量，需独立 server。图省事选 CRD，深度定制写聚合 server。"
+      },
+      {
+        "name": "风格架构：为可执行性砍掉 OpenAPI 的表达力",
+        "content": "结构性 schema 只保留 OpenAPI v3 的素子集。pruning、SSA、defaulting 都依赖结构可判定，表达力超标就无法保证算法正确——典型的克制设计。"
+      },
+      {
+        "name": "原理分析：一个 CRD 的真实成本清单",
+        "content": "一个 CRD = 一个 REST 端点 + 一个 etcd client + 一块 OpenAPI 体积。1000+ 个时 apiserver 曾被打到 8 GiB，删除即删数据，不是免费配置项。"
+      }
+    ],
+    "practices": [
+      "删 CRD 前先 kubectl get <plural> -o yaml 备份，误删不可恢复。",
+      "apply 含未知字段的实例，用 -o yaml 确认字段被静默裁剪，别信 apply 成功。",
+      "kubectl get ct 报 not found，先查 RBAC 授权，错误消息有误导性。",
+      "规划好 kind、plural、shortNames 再建，三者建后不可改，改名只能新建迁数据。",
+      "控制器只写 /status，判断需求满足看 metadata.generation。"
+    ],
+    "example": "apply 一份 v1 CRD，kind 写 CronTab、plural 写 crontabs，api-resources 多出 crontabs/ct。再 apply 实例时多写 schema 外的 privileged: true——apply 不报错，但 -o yaml 里永远看不到它，即默认 pruning。",
+    "subTopics": [
+      {
+        "name": "TPR（ThirdPartyResources）",
+        "note": "第一个实验方案的遗产",
+        "body": "1.2 引入、1.7 弃用、1.8 移除。没有 schema 校验、只能命名空间级、版本写死 v1。CRD 继承它零代码加资源的定位，补齐了 cluster-scope、命名 kind、校验 schema。"
+      },
+      {
+        "name": "结构性 schema",
+        "note": "v1 强制要求，pruning 的前提",
+        "body": "1.15 提出、1.16 v1 必填、1.18 强制，新增 NonStructuralSchema condition。非结构的 CRD 享受不到 explain、pruning、defaulting 和 SSA 字段级合并。"
+      },
+      {
+        "name": "服务端裁剪（pruning）",
+        "note": "静默丢字段的真凶",
+        "body": "v1 默认开启，schema 未声明的字段写入 etcd 前被裁掉，apply 不报错。想保留须用 x-kubernetes-preserve-unknown-fields: true，preserveUnknownFields 已禁止。"
+      },
+      {
+        "name": "subresources",
+        "note": "status/scale 单独走一个端点",
+        "body": "1.10 引入 status 与 scale。控制器写 status 走 /status 端点，普通 PUT 主资源时 status 变更被忽略；scale 让 HPA 能作用到 CR。generation 只在 spec 变更时 +1。"
+      },
+      {
+        "name": "api-approved.kubernetes.io",
+        "note": "k8s.io 域下的社区准入门槛",
+        "body": "*.k8s.io 域下的 CRD 必须带此注解指向 SIG 的 API review PR，否则创建被拒。这是社区治理不是技术限制，自己的 group（如 stable.example.com）不需要。"
+      },
+      {
+        "name": "conversion webhook",
+        "note": "多版本 CRD 最容易踩的坑",
+        "body": "只有一个 storage 版本，其它版本读写都要转换。strategy: None 要求各版本字段一致，不一致就得 webhook。webhook 挂掉连旧版本对象都读不出来，cert-manager 升级事故的主因。"
+      }
+    ],
+    "nextSteps": "在 test 集群 apply 官方 cron-tab 的 v1 CRD，确认出现 crontabs/ct。再 apply 含未知字段的实例看被静默裁剪；加 self >= oldSelf 的 CEL 规则；删 CRD 前先备份。",
+    "books": [
+      {
+        "id": "k8s-action",
+        "reason": "读第 1 版 16 章看扩展 API 初衷，第 2 版 4 章补 managedFields 底座。"
+      }
+    ]
+  },
+  {
+    "id": "cpp-move-rust-ownership",
+    "keywordId": "cpp-move-rust-ownership",
+    "opening": "2002 年 9 月 10 日, Howard Hinnant 向 C++ 委员会提交 N1377: C++98 的 std::auto_ptr 拷贝构造会悄悄偷走所有权, 谁把它塞进 std::vector, 一次排序就双重释放。Rust 的起点传闻是一座温哥华电梯, Graydon Hoare 受够 C/C++ 内存错误, 2013 年干脆移除 GC。同样回答『这块内存归谁』, 两个语言给出近乎相反的答案。",
+    "sections": [
+      {
+        "heading": "同一道题, 两条修法: 提案驱动与编译器后置",
+        "body": "C++ 走的是委员会提案路线。2002 年 Hinnant 的 N1377 动机直指 std::vector: 拷贝要新开 buffer, 移动只需偷三根指针; 2004 年 N1690 确立核心论证——从右值移动安全, 因为没人持有右值的引用; 2006 年 N2118 把右值引用从『move 的载体』扩成完整语言特性, 直到 2011 年 GCC 4.6 首发、同年 8 月 C++11 定稿。Rust 相反: 2006 年 Hoare 在 Mozilla 私人项目起步, 所有权系统 2010 年成形, 2013 年移除 GC, 2015 年 1.0 才稳定交付。一个先有标准后有编译器, 一个先定语义再谈稳定。"
+      },
+      {
+        "heading": "移动之后, 源对象是幽灵还是禁地",
+        "body": "C++11 之后你 move 走一个对象, 源对象进入 valid but unspecified: 标准只保证它还能析构、还能赋值。vector 通常变空, 短 string 走 SSO 却把 15 字节 buffer 逐字节拷走, list/map 又常变空——没有『一定为空』的保证。Rust 把同一场景变成编译错误: `let s2 = s; println!(\"{}\", s);` 直接 E0382。一个允许幽灵在运行时游荡, 一个在编译期立下禁地。补丁打到 2019 年 GCC 9, 用 -Wpessimizing-move 警告 return std::move(local) 这类反模式。"
+      },
+      {
+        "heading": "std::move 其实什么都没干",
+        "body": "std::move 的完整实现就是一行: static_cast<remove_reference<T>::type&&>(t)。它不搬任何东西, 只是把对象标记成『可被 move』, 真正的搬运发生在 move 构造函数被选中时。坑也随之而来: 标准库扩容用 move_if_noexcept, 你的 move 没标 noexcept, vector 宁可退化成拷贝; 类型不可拷贝就编译失败。模板里的 T&& 也不是右值引用而是转发引用, 得用 std::forward 保真。Rust 没有 move 关键字: 赋值、传参、返回默认 move, 只有 Copy 例外——i32 赋值后两个都活着, String 赋值后旧的消失。"
+      },
+      {
+        "heading": "扩容那一刻, 标准库替你做了决定",
+        "body": "同一个扩容问题, 两个标准库给出相反解法。C++ 的 vector 因 move 可能抛异常, 扩容走 move_if_noexcept, 正确性靠人写 noexcept 去喂; Rust 的 Vec 扩容直接 move, 因为类型系统保证 move 是一次不抛的位拷贝。但所有权并不万能: 2017 年 Firefox 57 把 16 万行 C++ 的 CSS 引擎重写成 8.5 万行 Rust, 两次 C++ 并行化失败后靠 rayon 成功, 69 个安全 bug 里 51 个在 Rust 下不可能发生——团队却误复现了已修复的 :visited 漏洞。所有权杀内存 bug, 逻辑 bug 仍要靠测试。"
+      }
+    ],
+    "angles": [
+      {
+        "name": "设计模式: move-only 类型",
+        "content": "C++ 靠显式删除拷贝构造得到 unique_ptr, Rust 靠类型系统默认得到 String/Box——同一个『不可拷贝、只可转移』概念, 一个靠禁止, 一个靠默认。"
+      },
+      {
+        "name": "概念拆解: 值类别 vs Copy",
+        "content": "C++ 有 lvalue/prvalue/xvalue, xvalue 是『将死之物』; Rust 只有 Copy/move。同一转移, C++ 要人写 std::move, Rust 是默认。"
+      },
+      {
+        "name": "风格架构: 值传递加 move",
+        "content": "Dave Abrahams 的 pass-by-value 让 Chromium 用值传参加 move 换少分配, 漏标 noexcept 就退化拷贝; Rust 隐式 move 让同一风格成默认。"
+      },
+      {
+        "name": "原理分析: 借用与 elision 的对照",
+        "content": "C++ 靠 NRVO/elision 让 return 大对象不拷贝; Rust 返回即 move。NLL 让借用活到最后一次使用, 对应 C++ 用警告兜误用 std::move。"
+      }
+    ],
+    "practices": [
+      "自定义类型 move 构造/赋值标 noexcept, 否则 vector 扩容静默退化拷贝。",
+      "别 return std::move(local), 它阻止 NRVO 且被 GCC 9 警告。",
+      "值类别速查: 具名=lvalue, std::move 包=xvalue, 字面量=prvalue。",
+      "判 Copy: 成员全 Copy 且无 Drop, 否则传参静默 move, 报 E0382。",
+      "NLL 后借用到最后一次使用, 用 data.push 在 last use 后能否编译验证直觉。"
+    ],
+    "example": "同一段 push_back 代码, C++ 里 move 没标 noexcept, 触发扩容时打印的是 copy 而非 move——标准库宁可拷贝也不赌你的 move 不抛。Rust 里 `data.push(4)` 放在借用最后一次使用之后, 1.63 前编译不过——NLL 让借用活到最后一次使用。",
+    "subTopics": [
+      {
+        "name": "std::move 与 std::forward",
+        "note": "一个转右值, 一个保转发",
+        "body": "std::move 是 static_cast 到右值引用, 不搬任何东西, 真正搬走的是 move 构造函数。模板 T&& 是转发引用, 传给下一层要用 std::forward 保真, 否则 lvalue 被 std::move 掉。"
+      },
+      {
+        "name": "move_if_noexcept 扩容陷阱",
+        "note": "没标 noexcept 就静默拷贝",
+        "body": "vector 扩容用 move_if_noexcept: 你的 move 若可能抛异常, 它宁可拷贝, 因为拷贝失败还能回滚。类型不可拷贝就直接编译错误。修正就一句话: 析构不抛, move 标 noexcept。"
+      },
+      {
+        "name": "NLL 非词法生命周期",
+        "note": "借用活到最后一次使用",
+        "body": "RFC 2094 由 Niko Matsakis 主导, 用 MIR 控制流图算借用存活范围, 原来 match 分支等四类合法代码都被误拒; Rust 1.63(2022) 全量稳定, 残余交给 Polonius。"
+      },
+      {
+        "name": "Copy 与 Clone 的边界",
+        "note": "位拷贝与深拷贝之分",
+        "body": "Copy 是编译期位拷贝, 赋值即拷贝, i32 传参后两个变量都活着; String 不是 Copy, 赋值即 move, 旧变量成禁地。忘写 Copy 导致自定义 struct 传参被静默 move, 是最常见的新人报错。"
+      },
+      {
+        "name": "Rc/RefCell 的坑",
+        "note": "单线程、成环泄漏、运行时报错",
+        "body": "Rc 是单线程引用计数, 多线程必须 Arc; Rc<RefCell> 成环会泄漏, Rust 没有 GC 兜底。RefCell 违反借用规则是运行时 panic(BorrowMutError), 不是编译错——借用检查器管不到动态借用。"
+      },
+      {
+        "name": "Stylo 与所有权边界",
+        "note": "内存 bug 归零, 逻辑 bug 照旧",
+        "body": "Firefox 57 用 Rust 重写 CSS 引擎, 16 万行 C++ 换 8.5 万行, 并行化靠 rayon 成功。69 个安全 bug 中 51 个不可能发生, 团队误复现了已修复的历史漏洞——逻辑 bug 靠测试。"
+      }
+    ],
+    "nextSteps": "先关优化编译 C++ 示例, 数清拷贝/移动打印, 再补 noexcept 看扩容变化。然后装 Rust, 复现 E0382 与 NLL 前后对照。最后自答: unique_ptr 的拷贝为何被删, String 的赋值为何不报错。",
+    "books": [
+      {
+        "id": "effcpp",
+        "reason": "Item 23: std::move 是 cast, Item 29: noexcept 扩容坑。"
+      },
+      {
+        "id": "rust-book",
+        "reason": "第 4 章讲三规则, 第 15 章覆盖 Rc 成环泄漏, 从设计意图而非语法出发。"
+      }
+    ]
   }
 ]
